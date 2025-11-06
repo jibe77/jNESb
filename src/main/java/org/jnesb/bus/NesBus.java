@@ -37,12 +37,15 @@ public final class NesBus implements CpuBus {
 
     public void reset() {
         cpu.reset();
+        ppu.reset();
         systemClockCounter = 0;
-        ppu.clearFrameFlag();
     }
 
     public void clock() {
         ppu.clock();
+        if (ppu.pollNmi()) {
+            cpu.nmi();
+        }
         if (systemClockCounter % 3 == 0) {
             cpu.clock();
         }
