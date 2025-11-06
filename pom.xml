@@ -17,6 +17,8 @@
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <maven.enforcer.mavenVersion>[3.9.11,5)</maven.enforcer.mavenVersion>
         <junit.jupiter.version>5.10.2</junit.jupiter.version>
+        <javafx.version>23.0.2</javafx.version>
+        <javafx.classifier>macm</javafx.classifier>
     </properties>
 
     <build>
@@ -65,6 +67,24 @@
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.jupiter.version}</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>${javafx.classifier}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>${javafx.classifier}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>${javafx.classifier}</classifier>
         </dependency>
     </dependencies>
 

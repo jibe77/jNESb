@@ -9,6 +9,9 @@ import org.jnesb.cartridge.Cartridge.Mirror;
  */
 public final class Ppu2C02 {
 
+    public static final int SCREEN_WIDTH = 256;
+    public static final int SCREEN_HEIGHT = 240;
+
     private static final int CONTROL_INCREMENT_MODE = 0x04;
     private static final int CONTROL_PATTERN_BACKGROUND = 0x10;
     private static final int CONTROL_ENABLE_NMI = 0x80;
@@ -95,6 +98,21 @@ public final class Ppu2C02 {
 
     public Sprite getScreen() {
         return screenSprite;
+    }
+
+    public void copyScreenRgb(int[] target) {
+        if (target == null || target.length < screenSprite.width() * screenSprite.height()) {
+            return;
+        }
+        System.arraycopy(screenSprite.data(), 0, target, 0, screenSprite.data().length);
+    }
+
+    public int screenWidth() {
+        return screenSprite.width();
+    }
+
+    public int screenHeight() {
+        return screenSprite.height();
     }
 
     public Sprite getNameTable(int index) {
