@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 /**
  * Java port of the OneLoneCoder olcNES Cartridge abstraction (OLC-3 license).
@@ -25,8 +26,9 @@ public final class Cartridge {
     private final byte[] prgMemory;
     private final byte[] chrMemory;
     private final Mapper mapper;
-    private final Mirror mirror;
+    private Mirror mirror;
     private final boolean imageValid;
+    private Consumer<Mirror> mirrorConsumer;
 
     private Cartridge(int mapperId,
                       int prgBanks,
@@ -44,6 +46,9 @@ public final class Cartridge {
         this.mapper = mapper;
         this.mirror = mirror;
         this.imageValid = imageValid;
+        if (this.mapper != null) {
+            this.mapper.setMirrorListener(this::applyMirror);
+        }
     }
 
     public static Cartridge load(Path path) throws IOException {
@@ -80,6 +85,7 @@ public final class Cartridge {
 
         Mapper mapper = switch (mapperId) {
             case 0 -> new Mapper0(prgBanks, chrBanks);
+            case 1 -> new Mapper1(prgBanks, chrBanks);
             default -> throw new IOException("Unsupported mapper: " + mapperId);
         };
 
@@ -92,6 +98,13 @@ public final class Cartridge {
 
     public Mirror mirror() {
         return mirror;
+    }
+
+    public void setMirrorConsumer(Consumer<Mirror> consumer) {
+        this.mirrorConsumer = consumer;
+        if (consumer != null) {
+            consumer.accept(mirror);
+        }
     }
 
     public int mapperId() {
@@ -108,7 +121,7 @@ public final class Cartridge {
     }
 
     public boolean cpuWrite(int address, int value) {
-        int mapped = mapper.cpuMapWrite(address & 0xFFFF);
+        int mapped = mapper.cpuMapWrite(address & 0xFFFF, value & 0xFF);
         if (mapped >= 0) {
             prgMemory[mapped] = (byte) value;
             return true;
@@ -140,6 +153,16 @@ public final class Cartridge {
 
     public int chrBankCount() {
         return chrBanks;
+    }
+
+    private void applyMirror(Mirror newMirror) {
+        if (newMirror == null || newMirror == mirror) {
+            return;
+        }
+        mirror = newMirror;
+        if (mirrorConsumer != null) {
+            mirrorConsumer.accept(newMirror);
+        }
     }
 
     private static final class Header {

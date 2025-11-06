@@ -13,11 +13,15 @@ public final class Ppu2C02 {
     public static final int SCREEN_HEIGHT = 240;
 
     private static final int CONTROL_INCREMENT_MODE = 0x04;
+    private static final int CONTROL_PATTERN_SPRITE = 0x08;
     private static final int CONTROL_PATTERN_BACKGROUND = 0x10;
+    private static final int CONTROL_SPRITE_SIZE = 0x20;
     private static final int CONTROL_ENABLE_NMI = 0x80;
 
     private static final int MASK_RENDER_BACKGROUND_LEFT = 0x02;
+    private static final int MASK_RENDER_SPRITE_LEFT = 0x04;
     private static final int MASK_RENDER_BACKGROUND = 0x08;
+    private static final int MASK_RENDER_SPRITES = 0x10;
 
     private static final int STATUS_SPRITE_OVERFLOW = 0x20;
     private static final int STATUS_SPRITE_ZERO_HIT = 0x40;
@@ -61,6 +65,17 @@ public final class Ppu2C02 {
     private int bgNextTileLsb;
     private int bgNextTileMsb;
 
+    private final int[] spriteShifterPatternLow = new int[8];
+    private final int[] spriteShifterPatternHigh = new int[8];
+    private final int[] spriteXCounter = new int[8];
+    private final int[] spriteAttributes = new int[8];
+    private final int[] spriteOamIndex = new int[8];
+    private final int[] spriteY = new int[8];
+    private final int[] spriteTileId = new int[8];
+    private int spriteCount;
+    private boolean spriteZeroPossible;
+    private boolean spriteZeroBeingRendered;
+
     public Ppu2C02() {
         initializePalette();
     }
@@ -87,12 +102,30 @@ public final class Ppu2C02 {
         tramAddress.set(0);
         frameComplete = false;
         nmiRequested = false;
+        spriteCount = 0;
+        spriteZeroPossible = false;
+        spriteZeroBeingRendered = false;
+        for (int i = 0; i < 8; i++) {
+            spriteShifterPatternLow[i] = 0;
+            spriteShifterPatternHigh[i] = 0;
+            spriteXCounter[i] = 0;
+            spriteAttributes[i] = 0;
+            spriteOamIndex[i] = 0;
+            spriteY[i] = 0;
+            spriteTileId[i] = 0;
+        }
     }
 
     public void connectCartridge(Cartridge cartridge) {
         this.cartridge = cartridge;
         if (cartridge != null) {
             this.mirrorMode = cartridge.mirror();
+        }
+    }
+
+    public void setMirrorMode(Mirror mirror) {
+        if (mirror != null) {
+            this.mirrorMode = mirror;
         }
     }
 
@@ -262,6 +295,11 @@ public final class Ppu2C02 {
         }
     }
 
+    public void dmaWrite(int data) {
+        oam[oamAddress & 0xFF] = data & 0xFF;
+        oamAddress = (oamAddress + 1) & 0xFF;
+    }
+
     public int ppuRead(int address, boolean readOnly) {
         address &= 0x3FFF;
         int data = 0x00;
@@ -323,6 +361,9 @@ public final class Ppu2C02 {
         if ((visibleScanline || preRenderLine) && cycle > 0 && cycle < 341) {
             if ((cycle >= 2 && cycle <= 257) || (cycle >= 321 && cycle <= 337)) {
                 updateBackgroundShifters();
+                if (visibleScanline) {
+                    updateSpriteShifters();
+                }
 
                 switch ((cycle - 1) & 0x07) {
                     case 0 -> {
@@ -361,6 +402,9 @@ public final class Ppu2C02 {
             } else if (cycle == 257) {
                 loadBackgroundShifters();
                 transferAddressX();
+                if (visibleScanline) {
+                    evaluateSprites();
+                }
             } else if (cycle == 338 || cycle == 340) {
                 bgNextTileId = ppuRead(0x2000 | (vramAddress.get() & 0x0FFF), true);
             }
@@ -390,12 +434,63 @@ public final class Ppu2C02 {
             }
         }
 
+        int spritePixel = 0;
+        int spritePalette = 0;
+        int spritePriority = 0;
+        spriteZeroBeingRendered = false;
+
+        if (isSpriteRenderingEnabled()) {
+            for (int i = 0; i < spriteCount; i++) {
+                if (spriteXCounter[i] == 0) {
+                    int lo = (spriteShifterPatternLow[i] & 0x80) >> 7;
+                    int hi = (spriteShifterPatternHigh[i] & 0x80) >> 6;
+                    int pixel = hi | lo;
+                    if (pixel != 0) {
+                        spritePixel = pixel;
+                        spritePalette = (spriteAttributes[i] & 0x03) + 0x04;
+                        spritePriority = (spriteAttributes[i] & 0x20) == 0 ? 1 : 0;
+                        if (spriteOamIndex[i] == 0) {
+                            spriteZeroBeingRendered = true;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (!isSpriteLeftEnabled() && cycle <= 8) {
+                spritePixel = 0;
+                spritePalette = 0;
+                spritePriority = 0;
+            }
+        }
+
         int pixel = 0;
         int palette = 0;
 
         if (bgPixel != 0) {
             pixel = bgPixel;
             palette = bgPalette;
+        }
+
+        if (spritePixel != 0) {
+            if (bgPixel == 0) {
+                pixel = spritePixel;
+                palette = spritePalette;
+            } else if (spritePriority == 1) {
+                pixel = spritePixel;
+                palette = spritePalette;
+            }
+
+            if (spriteZeroPossible && spriteZeroBeingRendered && bgPixel != 0) {
+                if (visibleScanline && cycle >= 1 && cycle < 255) {
+                    if (isBackgroundRenderingEnabled() && isSpriteRenderingEnabled()) {
+                        if (isBackgroundLeftEnabled() || cycle > 8) {
+                            if (isSpriteLeftEnabled() || cycle > 8) {
+                                status |= STATUS_SPRITE_ZERO_HIT;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (visibleScanline && visibleCycle) {
@@ -433,6 +528,14 @@ public final class Ppu2C02 {
         return (mask & MASK_RENDER_BACKGROUND_LEFT) != 0;
     }
 
+    private boolean isSpriteRenderingEnabled() {
+        return (mask & MASK_RENDER_SPRITES) != 0;
+    }
+
+    private boolean isSpriteLeftEnabled() {
+        return (mask & MASK_RENDER_SPRITE_LEFT) != 0;
+    }
+
     private void updateBackgroundShifters() {
         if (!isBackgroundRenderingEnabled()) {
             return;
@@ -442,6 +545,20 @@ public final class Ppu2C02 {
         bgShifterPatternHigh = ((bgShifterPatternHigh << 1) & 0xFFFF);
         bgShifterAttributeLow = ((bgShifterAttributeLow << 1) & 0xFFFF);
         bgShifterAttributeHigh = ((bgShifterAttributeHigh << 1) & 0xFFFF);
+    }
+
+    private void updateSpriteShifters() {
+        if (!isSpriteRenderingEnabled()) {
+            return;
+        }
+        for (int i = 0; i < spriteCount; i++) {
+            if (spriteXCounter[i] > 0) {
+                spriteXCounter[i]--;
+            } else {
+                spriteShifterPatternLow[i] = ((spriteShifterPatternLow[i] << 1) & 0xFF);
+                spriteShifterPatternHigh[i] = ((spriteShifterPatternHigh[i] << 1) & 0xFF);
+            }
+        }
     }
 
     private void loadBackgroundShifters() {
@@ -512,6 +629,80 @@ public final class Ppu2C02 {
         vramAddress.setCoarseY(tramAddress.coarseY());
     }
 
+    private void evaluateSprites() {
+        spriteCount = 0;
+        spriteZeroPossible = false;
+        if (!isSpriteRenderingEnabled()) {
+            return;
+        }
+        for (int i = 0; i < 8; i++) {
+            spriteShifterPatternLow[i] = 0;
+            spriteShifterPatternHigh[i] = 0;
+            spriteXCounter[i] = 0;
+            spriteAttributes[i] = 0;
+            spriteOamIndex[i] = 0;
+            spriteY[i] = 0;
+            spriteTileId[i] = 0;
+        }
+        int spriteHeight = ((control & CONTROL_SPRITE_SIZE) != 0) ? 16 : 8;
+        int spritesFound = 0;
+        for (int i = 0; i < 64; i++) {
+            int y = oam[i * 4] & 0xFF;
+            int diff = scanline - y;
+            if (diff >= 0 && diff < spriteHeight) {
+                if (spritesFound < 8) {
+                    spriteY[spritesFound] = y;
+                    spriteTileId[spritesFound] = oam[i * 4 + 1] & 0xFF;
+                    spriteAttributes[spritesFound] = oam[i * 4 + 2] & 0xFF;
+                    spriteXCounter[spritesFound] = oam[i * 4 + 3] & 0xFF;
+                    spriteOamIndex[spritesFound] = i;
+                    if (i == 0) {
+                        spriteZeroPossible = true;
+                    }
+                    spritesFound++;
+                } else {
+                    status |= STATUS_SPRITE_OVERFLOW;
+                    break;
+                }
+            }
+        }
+        spriteCount = spritesFound;
+
+        for (int i = 0; i < spriteCount; i++) {
+            int row = scanline - spriteY[i];
+            int attr = spriteAttributes[i];
+            int tileId = spriteTileId[i];
+            int addrLo;
+            if ((control & CONTROL_SPRITE_SIZE) != 0) {
+                if ((attr & 0x80) != 0) {
+                    row = 15 - row;
+                }
+                int table = tileId & 0x01;
+                tileId &= 0xFE;
+                if (row >= 8) {
+                    tileId++;
+                    row -= 8;
+                }
+                addrLo = (table << 12) | (tileId << 4) | (row & 0x07);
+            } else {
+                if ((attr & 0x80) != 0) {
+                    row = 7 - row;
+                }
+                int table = (control & CONTROL_PATTERN_SPRITE) != 0 ? 1 : 0;
+                addrLo = (table << 12) | (tileId << 4) | (row & 0x07);
+            }
+            int addrHi = addrLo + 8;
+            int patternLow = ppuRead(addrLo, true);
+            int patternHigh = ppuRead(addrHi, true);
+            if ((attr & 0x40) != 0) {
+                patternLow = reverseByte(patternLow);
+                patternHigh = reverseByte(patternHigh);
+            }
+            spriteShifterPatternLow[i] = patternLow & 0xFF;
+            spriteShifterPatternHigh[i] = patternHigh & 0xFF;
+        }
+    }
+
     private int resolveNameTable(int address) {
         int result;
         switch (mirrorMode) {
@@ -538,6 +729,15 @@ public final class Ppu2C02 {
         palette &= 0x07;
         int index = paletteTable[(palette << 2) | pixel] & 0x3F;
         return paletteScreen[index];
+    }
+
+    private static int reverseByte(int value) {
+        int result = 0;
+        for (int i = 0; i < 8; i++) {
+            result <<= 1;
+            result |= (value >> i) & 0x01;
+        }
+        return result & 0xFF;
     }
 
     private void initializePalette() {

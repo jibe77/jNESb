@@ -41,6 +41,7 @@ public final class NesBus implements CpuBus {
     public void insertCartridge(Cartridge cartridge) {
         this.cartridge = cartridge;
         ppu.connectCartridge(cartridge);
+        cartridge.setMirrorConsumer(ppu::setMirrorMode);
     }
     public NesController controller(int index) {
         return controllers[index & 1];
@@ -117,6 +118,12 @@ public final class NesBus implements CpuBus {
             cpuRam[address & 0x07FF] = data;
         } else if (address >= 0x2000 && address <= 0x3FFF) {
             ppu.cpuWrite(address & 0x0007, data);
+        } else if (address == 0x4014) {
+            int base = (data & 0xFF) << 8;
+            for (int i = 0; i < 256; i++) {
+                int value = read(base + i, false);
+                ppu.dmaWrite(value);
+            }
         } else if (address == 0x4016) {
             boolean strobe = (data & 0x01) != 0;
             for (NesController controller : controllers) {

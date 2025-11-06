@@ -19,7 +19,7 @@ public final class Mapper0 extends Mapper {
     }
 
     @Override
-    public int cpuMapWrite(int address) {
+    public int cpuMapWrite(int address, int data) {
         if (address >= 0x8000 && address <= 0xFFFF) {
             return address & (prgBanks > 1 ? 0x7FFF : 0x3FFF);
         }
