@@ -18,7 +18,7 @@
         <maven.enforcer.mavenVersion>[3.9.11,5)</maven.enforcer.mavenVersion>
         <junit.jupiter.version>5.10.2</junit.jupiter.version>
         <javafx.version>23.0.2</javafx.version>
-        <javafx.classifier>macm</javafx.classifier>
+        <javafx.classifier>mac</javafx.classifier>
     </properties>
 
     <build>
