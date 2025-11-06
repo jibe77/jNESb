@@ -142,9 +142,9 @@ public final class JavaFxNesEmulator extends Application {
     }
 
     private void configureDefaultKeyBindings() {
-        keyBindings.put(KeyCode.X, Button.A);
-        keyBindings.put(KeyCode.Z, Button.B);
-        keyBindings.put(KeyCode.A, Button.SELECT);
+        keyBindings.put(KeyCode.W, Button.A);
+        keyBindings.put(KeyCode.X, Button.B);
+        keyBindings.put(KeyCode.Q, Button.SELECT);
         keyBindings.put(KeyCode.S, Button.START);
         keyBindings.put(KeyCode.UP, Button.UP);
         keyBindings.put(KeyCode.DOWN, Button.DOWN);
