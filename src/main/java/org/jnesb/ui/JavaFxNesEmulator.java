@@ -1,6 +1,8 @@
 package org.jnesb.ui;
 
 import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.LockSupport;
@@ -12,10 +14,14 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
 import org.jnesb.bus.NesBus;
+import org.jnesb.input.NesController;
+import org.jnesb.input.NesController.Button;
 import org.jnesb.ppu.Ppu2C02;
 
 public final class JavaFxNesEmulator extends Application {
@@ -34,6 +40,8 @@ public final class JavaFxNesEmulator extends Application {
     private Canvas canvas;
     private WritableImage frameImage;
     private int[] rgbBuffer;
+    private NesController controller1;
+    private final Map<KeyCode, Button> keyBindings = new EnumMap<>(KeyCode.class);
 
     public static void launchWith(NesBus bus) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -51,13 +59,18 @@ public final class JavaFxNesEmulator extends Application {
     public void start(Stage stage) {
         this.bus = Objects.requireNonNull(sharedBus, "sharedBus");
         this.ppu = bus.ppu();
+        this.controller1 = bus.controller(0);
         this.rgbBuffer = new int[Ppu2C02.SCREEN_WIDTH * Ppu2C02.SCREEN_HEIGHT];
         this.frameImage = new WritableImage(Ppu2C02.SCREEN_WIDTH, Ppu2C02.SCREEN_HEIGHT);
         this.canvas = new Canvas(Ppu2C02.SCREEN_WIDTH * DISPLAY_SCALE, Ppu2C02.SCREEN_HEIGHT * DISPLAY_SCALE);
+        configureDefaultKeyBindings();
 
         StackPane root = new StackPane(canvas);
         stage.setTitle("jNESb");
-        stage.setScene(new Scene(root));
+        Scene scene = new Scene(root);
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handleKey(event, true));
+        scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> handleKey(event, false));
+        stage.setScene(scene);
         stage.setResizable(false);
         stage.setOnCloseRequest(event -> running = false);
         stage.show();
@@ -105,6 +118,25 @@ public final class JavaFxNesEmulator extends Application {
                 }
                 nextFrameTarget = Math.max(nextFrameTarget + FRAME_NANOS, System.nanoTime());
             }
+        }
+    }
+
+    private void configureDefaultKeyBindings() {
+        keyBindings.put(KeyCode.X, Button.A);
+        keyBindings.put(KeyCode.Z, Button.B);
+        keyBindings.put(KeyCode.A, Button.SELECT);
+        keyBindings.put(KeyCode.S, Button.START);
+        keyBindings.put(KeyCode.UP, Button.UP);
+        keyBindings.put(KeyCode.DOWN, Button.DOWN);
+        keyBindings.put(KeyCode.LEFT, Button.LEFT);
+        keyBindings.put(KeyCode.RIGHT, Button.RIGHT);
+    }
+
+    private void handleKey(KeyEvent event, boolean pressed) {
+        Button mapped = keyBindings.get(event.getCode());
+        if (mapped != null) {
+            controller1.setButton(mapped, pressed);
+            event.consume();
         }
     }
 

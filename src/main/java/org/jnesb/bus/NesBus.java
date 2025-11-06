@@ -3,6 +3,7 @@ package org.jnesb.bus;
 import org.jnesb.cartridge.Cartridge;
 import org.jnesb.cpu.Cpu6502;
 import org.jnesb.cpu.CpuBus;
+import org.jnesb.input.NesController;
 import org.jnesb.ppu.Ppu2C02;
 
 /**
@@ -14,6 +15,7 @@ public final class NesBus implements CpuBus {
     private final Cpu6502 cpu = new Cpu6502();
     private final Ppu2C02 ppu = new Ppu2C02();
     private final int[] cpuRam = new int[2048];
+    private final NesController[] controllers = {new NesController(), new NesController()};
 
     private Cartridge cartridge;
     private long systemClockCounter = 0;
@@ -34,10 +36,16 @@ public final class NesBus implements CpuBus {
         this.cartridge = cartridge;
         ppu.connectCartridge(cartridge);
     }
+    public NesController controller(int index) {
+        return controllers[index & 1];
+    }
 
     public void reset() {
         cpu.reset();
         ppu.reset();
+        for (NesController controller : controllers) {
+            controller.reset();
+        }
         systemClockCounter = 0;
     }
 
@@ -71,6 +79,10 @@ public final class NesBus implements CpuBus {
             return ppu.cpuRead(address & 0x0007, readOnly);
         }
 
+        if (address == 0x4016 || address == 0x4017) {
+            return controllers[address - 0x4016].read() & 0x01;
+        }
+
         return 0x00;
     }
 
@@ -87,6 +99,11 @@ public final class NesBus implements CpuBus {
             cpuRam[address & 0x07FF] = data;
         } else if (address >= 0x2000 && address <= 0x3FFF) {
             ppu.cpuWrite(address & 0x0007, data);
+        } else if (address == 0x4016) {
+            boolean strobe = (data & 0x01) != 0;
+            for (NesController controller : controllers) {
+                controller.setStrobe(strobe);
+            }
         }
     }
 }
