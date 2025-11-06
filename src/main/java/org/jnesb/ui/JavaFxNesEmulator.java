@@ -19,6 +19,7 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
+import org.jnesb.audio.AudioOutput;
 import org.jnesb.bus.NesBus;
 import org.jnesb.input.NesController;
 import org.jnesb.input.NesController.Button;
@@ -28,6 +29,7 @@ public final class JavaFxNesEmulator extends Application {
 
     private static final int DISPLAY_SCALE = 3;
     private static final long FRAME_NANOS = 16_666_667L;
+    private static final double CPU_FREQUENCY_NTSC = 1_789_773.0;
 
     private static NesBus sharedBus;
     private static CountDownLatch exitLatch;
@@ -42,6 +44,9 @@ public final class JavaFxNesEmulator extends Application {
     private int[] rgbBuffer;
     private NesController controller1;
     private final Map<KeyCode, Button> keyBindings = new EnumMap<>(KeyCode.class);
+    private AudioOutput audioOutput;
+    private double audioTimer;
+    private double cyclesPerSample;
 
     public static void launchWith(NesBus bus) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -64,6 +69,10 @@ public final class JavaFxNesEmulator extends Application {
         this.frameImage = new WritableImage(Ppu2C02.SCREEN_WIDTH, Ppu2C02.SCREEN_HEIGHT);
         this.canvas = new Canvas(Ppu2C02.SCREEN_WIDTH * DISPLAY_SCALE, Ppu2C02.SCREEN_HEIGHT * DISPLAY_SCALE);
         configureDefaultKeyBindings();
+        this.audioOutput = new AudioOutput();
+        this.audioOutput.start();
+        this.cyclesPerSample = CPU_FREQUENCY_NTSC / AudioOutput.SAMPLE_RATE;
+        this.audioTimer = 0;
 
         StackPane root = new StackPane(canvas);
         stage.setTitle("jNESb");
@@ -97,6 +106,9 @@ public final class JavaFxNesEmulator extends Application {
                 exitLatch.countDown();
             }
         }
+        if (audioOutput != null) {
+            audioOutput.close();
+        }
     }
 
     private void runLoop() {
@@ -104,7 +116,15 @@ public final class JavaFxNesEmulator extends Application {
         long nextFrameTarget = System.nanoTime() + FRAME_NANOS;
 
         while (running) {
-            bus.clock();
+            boolean cpuClocked = bus.clock();
+            if (cpuClocked) {
+                audioTimer += 1;
+                if (audioTimer >= cyclesPerSample) {
+                    audioTimer -= cyclesPerSample;
+                    double sample = bus.apu().sample();
+                    audioOutput.submitSample(sample);
+                }
+            }
             if (ppu.isFrameComplete()) {
                 ppu.copyScreenRgb(rgbBuffer);
                 ppu.clearFrameFlag();

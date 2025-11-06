@@ -1,5 +1,6 @@
 package org.jnesb.bus;
 
+import org.jnesb.apu.Apu;
 import org.jnesb.cartridge.Cartridge;
 import org.jnesb.cpu.Cpu6502;
 import org.jnesb.cpu.CpuBus;
@@ -14,6 +15,7 @@ public final class NesBus implements CpuBus {
 
     private final Cpu6502 cpu = new Cpu6502();
     private final Ppu2C02 ppu = new Ppu2C02();
+    private final Apu apu = new Apu();
     private final int[] cpuRam = new int[2048];
     private final NesController[] controllers = {new NesController(), new NesController()};
 
@@ -32,6 +34,10 @@ public final class NesBus implements CpuBus {
         return ppu;
     }
 
+    public Apu apu() {
+        return apu;
+    }
+
     public void insertCartridge(Cartridge cartridge) {
         this.cartridge = cartridge;
         ppu.connectCartridge(cartridge);
@@ -43,21 +49,29 @@ public final class NesBus implements CpuBus {
     public void reset() {
         cpu.reset();
         ppu.reset();
+        apu.reset();
         for (NesController controller : controllers) {
             controller.reset();
         }
         systemClockCounter = 0;
     }
 
-    public void clock() {
+    public boolean clock() {
         ppu.clock();
         if (ppu.pollNmi()) {
             cpu.nmi();
         }
+        boolean cpuClocked = false;
         if (systemClockCounter % 3 == 0) {
             cpu.clock();
+            apu.clock();
+            if (apu.pollIrq()) {
+                cpu.irq();
+            }
+            cpuClocked = true;
         }
         systemClockCounter++;
+        return cpuClocked;
     }
 
     @Override
@@ -77,6 +91,10 @@ public final class NesBus implements CpuBus {
 
         if (address >= 0x2000 && address <= 0x3FFF) {
             return ppu.cpuRead(address & 0x0007, readOnly);
+        }
+
+        if (address == 0x4015) {
+            return apu.cpuRead(address);
         }
 
         if (address == 0x4016 || address == 0x4017) {
@@ -104,6 +122,10 @@ public final class NesBus implements CpuBus {
             for (NesController controller : controllers) {
                 controller.setStrobe(strobe);
             }
+        } else if ((address >= 0x4000 && address <= 0x4013)
+                || address == 0x4015
+                || address == 0x4017) {
+            apu.cpuWrite(address, data);
         }
     }
 }
