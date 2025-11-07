@@ -23,7 +23,9 @@ public final class NesBus implements CpuBus {
     private final Apu apu;
     private final int[] cpuRam = new int[2048];
     private final NesController[] controllers = {new NesController(), new NesController()};
-    private final double[] audioSamples = new double[AUDIO_BUFFER_CAPACITY];
+    private final double[] audioSamplesLeft = new double[AUDIO_BUFFER_CAPACITY];
+    private final double[] audioSamplesRight = new double[AUDIO_BUFFER_CAPACITY];
+    private final Object audioBufferLock = new Object();
 
     private Cartridge cartridge;
     private long systemClockCounter = 0;
@@ -160,17 +162,31 @@ public final class NesBus implements CpuBus {
     }
 
     public boolean hasAudioSample() {
-        return audioSampleCount > 0;
+        synchronized (audioBufferLock) {
+            return audioSampleCount > 0;
+        }
     }
 
-    public double pollAudioSample() {
-        if (audioSampleCount == 0) {
-            return 0.0;
+    public boolean pollAudioSample(double[] target) {
+        if (target == null || target.length < 2) {
+            return false;
         }
-        double sample = audioSamples[audioSampleReadIndex];
-        audioSampleReadIndex = (audioSampleReadIndex + 1) % audioSamples.length;
-        audioSampleCount--;
-        return sample;
+        synchronized (audioBufferLock) {
+            while (audioSampleCount == 0) {
+                try {
+                    audioBufferLock.wait();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            target[0] = audioSamplesLeft[audioSampleReadIndex];
+            target[1] = audioSamplesRight[audioSampleReadIndex];
+            audioSampleReadIndex = (audioSampleReadIndex + 1) % audioSamplesLeft.length;
+            audioSampleCount--;
+            audioBufferLock.notifyAll();
+            return true;
+        }
     }
 
     private int dmcRead(int address) {
@@ -181,24 +197,36 @@ public final class NesBus implements CpuBus {
         audioCycleAccumulator += 1.0;
         while (audioCycleAccumulator >= AudioConfig.CPU_CYCLES_PER_SAMPLE) {
             audioCycleAccumulator -= AudioConfig.CPU_CYCLES_PER_SAMPLE;
-            enqueueAudioSample(apu.sample());
+            double[] stereo = apu.sample();
+            enqueueAudioSample(stereo[0], stereo[1]);
         }
     }
 
-    private void enqueueAudioSample(double sample) {
-        if (audioSampleCount == audioSamples.length) {
-            audioSampleReadIndex = (audioSampleReadIndex + 1) % audioSamples.length;
-            audioSampleCount--;
+    private void enqueueAudioSample(double left, double right) {
+        synchronized (audioBufferLock) {
+            while (audioSampleCount == audioSamplesLeft.length) {
+                try {
+                    audioBufferLock.wait();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            audioSamplesLeft[audioSampleWriteIndex] = left;
+            audioSamplesRight[audioSampleWriteIndex] = right;
+            audioSampleWriteIndex = (audioSampleWriteIndex + 1) % audioSamplesLeft.length;
+            audioSampleCount++;
+            audioBufferLock.notifyAll();
         }
-        audioSamples[audioSampleWriteIndex] = sample;
-        audioSampleWriteIndex = (audioSampleWriteIndex + 1) % audioSamples.length;
-        audioSampleCount++;
     }
 
     private void resetAudioSamples() {
-        audioCycleAccumulator = 0.0;
-        audioSampleWriteIndex = 0;
-        audioSampleReadIndex = 0;
-        audioSampleCount = 0;
+        synchronized (audioBufferLock) {
+            audioCycleAccumulator = 0.0;
+            audioSampleWriteIndex = 0;
+            audioSampleReadIndex = 0;
+            audioSampleCount = 0;
+            audioBufferLock.notifyAll();
+        }
     }
 }

@@ -19,6 +19,10 @@ final class DmcChannel {
     private int timerPeriod = RATE_TABLE[0];
     private int timerCounter = RATE_TABLE[0];
     private int outputLevel;
+    private double filteredOutput;
+    private boolean smoothingEnabled;
+    private double smoothingAlpha = 0.0;
+    private double smoothingTarget = 0.0;
 
     private int sampleAddress = 0xC000;
     private int sampleLength = 1;
@@ -43,6 +47,10 @@ final class DmcChannel {
         timerPeriod = RATE_TABLE[0];
         timerCounter = timerPeriod;
         outputLevel = 0;
+        filteredOutput = 0.0;
+        smoothingEnabled = false;
+        smoothingAlpha = 0.0;
+        smoothingTarget = 0.0;
         sampleAddress = 0xC000;
         sampleLength = 1;
         currentAddress = sampleAddress;
@@ -61,6 +69,9 @@ final class DmcChannel {
             timerCounter--;
         }
         fetchSampleBuffer();
+        if (!enabled && smoothingEnabled) {
+            filteredOutput += smoothingAlpha * (smoothingTarget - filteredOutput);
+        }
     }
 
     void writeControl(int data) {
@@ -76,6 +87,8 @@ final class DmcChannel {
 
     void writeDirectLoad(int data) {
         outputLevel = data & 0x7F;
+        filteredOutput = outputLevel;
+        smoothingTarget = outputLevel;
     }
 
     void writeSampleAddress(int data) {
@@ -94,14 +107,21 @@ final class DmcChannel {
             sampleBuffer = -1;
             bitsRemaining = 0;
             irqPending = false;
+            smoothingEnabled = true;
+            smoothingAlpha = 0.02;
+            smoothingTarget = 0.0;
         } else if (wasDisabled && bytesRemaining == 0) {
             restartSample();
+            smoothingEnabled = false;
+            filteredOutput = outputLevel;
+            smoothingTarget = outputLevel;
+            smoothingAlpha = 0.0;
         }
         fetchSampleBuffer();
     }
 
-    int output() {
-        return outputLevel;
+    double output() {
+        return filteredOutput;
     }
 
     boolean isActive() {
@@ -132,6 +152,13 @@ final class DmcChannel {
             if (outputLevel >= 2) {
                 outputLevel -= 2;
             }
+        }
+        if (smoothingEnabled) {
+            smoothingTarget = outputLevel;
+            filteredOutput += smoothingAlpha * (smoothingTarget - filteredOutput);
+        } else {
+            filteredOutput = outputLevel;
+            smoothingTarget = outputLevel;
         }
         shiftRegister >>>= 1;
         bitsRemaining--;

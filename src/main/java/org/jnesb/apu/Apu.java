@@ -6,12 +6,24 @@ public final class Apu {
 
     public static final int QUARTER_FRAME_PERIOD = 7457;
 
+    private static final double PULSE1_LEFT = 0.85;
+    private static final double PULSE1_RIGHT = 0.15;
+    private static final double PULSE2_LEFT = 0.15;
+    private static final double PULSE2_RIGHT = 0.85;
+    private static final double TRIANGLE_LEFT = 0.52;
+    private static final double TRIANGLE_RIGHT = 0.48;
+    private static final double NOISE_LEFT = 0.4;
+    private static final double NOISE_RIGHT = 0.6;
+    private static final double DMC_LEFT = 0.5;
+    private static final double DMC_RIGHT = 0.5;
+
     private final FrameSequencer frameSequencer = new FrameSequencer();
     private final PulseChannel pulse1 = new PulseChannel(true);
     private final PulseChannel pulse2 = new PulseChannel(false);
     private final TriangleChannel triangle = new TriangleChannel();
     private final NoiseChannel noise = new NoiseChannel();
     private final DmcChannel dmc;
+    private final double[] stereoSample = new double[2];
 
     private int statusRegister;
     private boolean irqInhibit;
@@ -169,24 +181,38 @@ public final class Apu {
         return irqPending && !irqInhibit;
     }
 
-    public double sample() {
-        int pulseSum = pulse1.output() + pulse2.output();
+    public double[] sample() {
+        int pulse1Sample = pulse1.output();
+        int pulse2Sample = pulse2.output();
+        double pulseLeftSum = pulse1Sample * PULSE1_LEFT + pulse2Sample * PULSE2_LEFT;
+        double pulseRightSum = pulse1Sample * PULSE1_RIGHT + pulse2Sample * PULSE2_RIGHT;
+        double pulseLeft = pulseLeftSum == 0
+                ? 0.0
+                : 95.88 / ((8128.0 / pulseLeftSum) + 100.0);
+        double pulseRight = pulseRightSum == 0
+                ? 0.0
+                : 95.88 / ((8128.0 / pulseRightSum) + 100.0);
+
         int triangleSample = triangle.output();
         int noiseSample = noise.output();
-        int dmcSample = dmc.output();
+        double dmcSample = dmc.output();
 
-        double pulseComponent = pulseSum == 0
+        double tndLeftInput = (triangleSample * TRIANGLE_LEFT) / 8227.0
+                + (noiseSample * NOISE_LEFT) / 12241.0
+                + (dmcSample * DMC_LEFT) / 22638.0;
+        double tndRightInput = (triangleSample * TRIANGLE_RIGHT) / 8227.0
+                + (noiseSample * NOISE_RIGHT) / 12241.0
+                + (dmcSample * DMC_RIGHT) / 22638.0;
+        double tndLeft = tndLeftInput == 0.0
                 ? 0.0
-                : 95.88 / ((8128.0 / pulseSum) + 100.0);
-
-        double tndInput = (triangleSample / 8227.0)
-                + (noiseSample / 12241.0)
-                + (dmcSample / 22638.0);
-        double tndComponent = tndInput == 0.0
+                : 159.79 / ((1.0 / tndLeftInput) + 100.0);
+        double tndRight = tndRightInput == 0.0
                 ? 0.0
-                : 159.79 / ((1.0 / tndInput) + 100.0);
+                : 159.79 / ((1.0 / tndRightInput) + 100.0);
 
-        return pulseComponent + tndComponent;
+        stereoSample[0] = pulseLeft + tndLeft;
+        stereoSample[1] = pulseRight + tndRight;
+        return stereoSample;
     }
 
     private static final class FrameSequencer {

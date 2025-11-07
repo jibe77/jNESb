@@ -49,6 +49,8 @@ public final class JavaFxNesEmulator extends Application {
     private NesZapper zapper;
     private final Map<KeyCode, Button> keyBindings = new EnumMap<>(KeyCode.class);
     private AudioOutput audioOutput;
+    private Thread audioThread;
+    private volatile boolean audioThreadRunning;
 
     public static void launchWith(NesBus bus) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -74,6 +76,7 @@ public final class JavaFxNesEmulator extends Application {
         configureDefaultKeyBindings();
         this.audioOutput = new AudioOutput();
         this.audioOutput.start();
+        startAudioThread();
 
         StackPane root = new StackPane(canvas);
         stage.setTitle("jNESb");
@@ -117,6 +120,7 @@ public final class JavaFxNesEmulator extends Application {
                 exitLatch.countDown();
             }
         }
+        stopAudioThread();
         if (audioOutput != null) {
             audioOutput.close();
         }
@@ -128,7 +132,6 @@ public final class JavaFxNesEmulator extends Application {
 
         while (running) {
             bus.clock();
-            drainAudioSamples();
             if (ppu.isFrameComplete()) {
                 ppu.copyScreenRgb(rgbBuffer);
                 ppu.clearFrameFlag();
@@ -181,13 +184,38 @@ public final class JavaFxNesEmulator extends Application {
         return argb;
     }
 
-    private void drainAudioSamples() {
-        if (audioOutput == null) {
+    private void startAudioThread() {
+        if (audioThread != null) {
             return;
         }
-        while (bus.hasAudioSample()) {
-            double sample = bus.pollAudioSample();
-            audioOutput.submitSample(sample);
+        audioThreadRunning = true;
+        audioThread = new Thread(this::runAudioLoop, "jNESb-Audio");
+        audioThread.setDaemon(true);
+        audioThread.start();
+    }
+
+    private void stopAudioThread() {
+        audioThreadRunning = false;
+        if (audioThread != null) {
+            audioThread.interrupt();
+            try {
+                audioThread.join(500);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            audioThread = null;
+        }
+    }
+
+    private void runAudioLoop() {
+        double[] stereoFrame = new double[2];
+        while (audioThreadRunning) {
+            if (!bus.pollAudioSample(stereoFrame)) {
+                continue;
+            }
+            if (audioOutput != null) {
+                audioOutput.submitSample(stereoFrame[0], stereoFrame[1]);
+            }
         }
     }
 
