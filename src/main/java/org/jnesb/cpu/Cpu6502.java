@@ -142,6 +142,12 @@ public class Cpu6502 {
         return clockCount;
     }
 
+    public void stall(int additionalCycles) {
+        if (additionalCycles > 0) {
+            cycles += additionalCycles;
+        }
+    }
+
     public Map<Integer, String> disassemble(int start, int stop) {
         Map<Integer, String> result = new LinkedHashMap<>();
         int addr = start & 0xFFFF;

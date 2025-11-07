@@ -208,13 +208,10 @@ public final class JavaFxNesEmulator extends Application {
     }
 
     private void runAudioLoop() {
-        double[] stereoFrame = new double[2];
         while (audioThreadRunning) {
-            if (!bus.pollAudioSample(stereoFrame)) {
-                continue;
-            }
+            double sample = bus.pollAudioSample();
             if (audioOutput != null) {
-                audioOutput.submitSample(stereoFrame[0], stereoFrame[1]);
+                audioOutput.submitSample(sample);
             }
         }
     }

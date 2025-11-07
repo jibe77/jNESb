@@ -15,7 +15,7 @@ import org.jnesb.AudioConfig;
 public final class AudioOutput implements AutoCloseable {
 
     public static final float SAMPLE_RATE = AudioConfig.SAMPLE_RATE;
-    private static final AudioFormat FORMAT = new AudioFormat(SAMPLE_RATE, 16, 2, true, false);
+    private static final AudioFormat FORMAT = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
     private static final double LOW_PASS_CUTOFF_HZ = 14_000.0;
     private static final double RC = 1.0 / (2.0 * Math.PI * LOW_PASS_CUTOFF_HZ);
     private static final double LOW_PASS_ALPHA = (1.0 / SAMPLE_RATE) / (RC + (1.0 / SAMPLE_RATE));
@@ -28,18 +28,12 @@ public final class AudioOutput implements AutoCloseable {
 
     private SourceDataLine line;
     private final AtomicBoolean started = new AtomicBoolean(false);
-    private double filteredLeftSample;
-    private double filteredRightSample;
-    private boolean filterLeftInitialized;
-    private boolean filterRightInitialized;
-    private double hp90PrevInputLeft;
-    private double hp90PrevOutputLeft;
-    private double hp440PrevInputLeft;
-    private double hp440PrevOutputLeft;
-    private double hp90PrevInputRight;
-    private double hp90PrevOutputRight;
-    private double hp440PrevInputRight;
-    private double hp440PrevOutputRight;
+    private double filteredSample;
+    private boolean filterInitialized;
+    private double hp90PrevInput;
+    private double hp90PrevOutput;
+    private double hp440PrevInput;
+    private double hp440PrevOutput;
 
     public void start() {
         if (started.get()) {
@@ -50,14 +44,10 @@ public final class AudioOutput implements AutoCloseable {
             line.open(FORMAT, buffer.length * 4);
             line.start();
             started.set(true);
-            filteredLeftSample = 0.0;
-            filteredRightSample = 0.0;
-            filterLeftInitialized = false;
-            filterRightInitialized = false;
-            hp90PrevInputLeft = hp90PrevOutputLeft = 0.0;
-            hp440PrevInputLeft = hp440PrevOutputLeft = 0.0;
-            hp90PrevInputRight = hp90PrevOutputRight = 0.0;
-            hp440PrevInputRight = hp440PrevOutputRight = 0.0;
+            filteredSample = 0.0;
+            filterInitialized = false;
+            hp90PrevInput = hp90PrevOutput = 0.0;
+            hp440PrevInput = hp440PrevOutput = 0.0;
         } catch (LineUnavailableException ex) {
             throw new IllegalStateException("Unable to open audio device", ex);
         }
@@ -73,54 +63,35 @@ public final class AudioOutput implements AutoCloseable {
         started.set(false);
     }
 
-    public void submitSample(double left, double right) {
+    public void submitSample(double sample) {
         if (!started.get()) {
             return;
         }
-        double filteredLeft = applyLowPass(applyHighPassChain(left, true), true);
-        double filteredRight = applyLowPass(applyHighPassChain(right, false), false);
-        short leftValue = toPcm(filteredLeft);
-        short rightValue = toPcm(filteredRight);
-        buffer[bufferIndex++] = (byte) (leftValue & 0xFF);
-        buffer[bufferIndex++] = (byte) ((leftValue >> 8) & 0xFF);
-        buffer[bufferIndex++] = (byte) (rightValue & 0xFF);
-        buffer[bufferIndex++] = (byte) ((rightValue >> 8) & 0xFF);
+        double processed = applyLowPass(applyHighPassChain(sample));
+        short value = toPcm(processed);
+        buffer[bufferIndex++] = (byte) (value & 0xFF);
+        buffer[bufferIndex++] = (byte) ((value >> 8) & 0xFF);
         if (bufferIndex >= buffer.length) {
             flush();
         }
     }
-    private double applyLowPass(double input, boolean leftChannel) {
-        if (leftChannel) {
-            if (!filterLeftInitialized) {
-                filteredLeftSample = input;
-                filterLeftInitialized = true;
-                return input;
-            }
-            filteredLeftSample += LOW_PASS_ALPHA * (input - filteredLeftSample);
-            return filteredLeftSample;
-        }
-        if (!filterRightInitialized) {
-            filteredRightSample = input;
-            filterRightInitialized = true;
+
+    private double applyLowPass(double input) {
+        if (!filterInitialized) {
+            filteredSample = input;
+            filterInitialized = true;
             return input;
         }
-        filteredRightSample += LOW_PASS_ALPHA * (input - filteredRightSample);
-        return filteredRightSample;
+        filteredSample += LOW_PASS_ALPHA * (input - filteredSample);
+        return filteredSample;
     }
 
-    private double applyHighPassChain(double input, boolean leftChannel) {
-        if (leftChannel) {
-            hp90PrevOutputLeft = input - hp90PrevInputLeft + HIGH_PASS_ALPHA_90 * hp90PrevOutputLeft;
-            hp90PrevInputLeft = input;
-            hp440PrevOutputLeft = hp90PrevOutputLeft - hp440PrevInputLeft + HIGH_PASS_ALPHA_440 * hp440PrevOutputLeft;
-            hp440PrevInputLeft = hp90PrevOutputLeft;
-            return hp440PrevOutputLeft;
-        }
-        hp90PrevOutputRight = input - hp90PrevInputRight + HIGH_PASS_ALPHA_90 * hp90PrevOutputRight;
-        hp90PrevInputRight = input;
-        hp440PrevOutputRight = hp90PrevOutputRight - hp440PrevInputRight + HIGH_PASS_ALPHA_440 * hp440PrevOutputRight;
-        hp440PrevInputRight = hp90PrevOutputRight;
-        return hp440PrevOutputRight;
+    private double applyHighPassChain(double input) {
+        hp90PrevOutput = input - hp90PrevInput + HIGH_PASS_ALPHA_90 * hp90PrevOutput;
+        hp90PrevInput = input;
+        hp440PrevOutput = hp90PrevOutput - hp440PrevInput + HIGH_PASS_ALPHA_440 * hp440PrevOutput;
+        hp440PrevInput = hp90PrevOutput;
+        return hp440PrevOutput;
     }
 
     private static short toPcm(double sample) {

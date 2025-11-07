@@ -87,19 +87,13 @@ final class TriangleChannel {
         lengthCounter.clock(enabled);
     }
     
-    /**
-     * Sortie du canal triangle
-     */
     int output() {
         if (!enabled || lengthCounter.value() == 0 || linearCounter == 0) {
             return 0;
         }
-        
-        // Ultrason silencing: fréquences trop hautes sont silencées
         if (timerReload < 2) {
-            return 7; // Valeur moyenne pour éviter les pops
+            return 0;
         }
-        
         return SEQUENCE[sequenceIndex];
     }
     

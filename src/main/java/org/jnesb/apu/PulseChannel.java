@@ -27,6 +27,8 @@ final class PulseChannel {
     private int sweepDivider;
     private boolean sweepReload;
     private boolean sweepMuted;
+    private boolean sweepOverflow;
+    private boolean reloadRequested;
 
     PulseChannel(boolean onesComplementNegate) {
         this.onesComplementNegate = onesComplementNegate;
@@ -57,7 +59,7 @@ final class PulseChannel {
         lengthCounter.load((data >> 3) & 0x1F);
         envelope.start();
         dutyStep = 0;
-        timerCounter = timerReload;
+        reloadRequested = true;
         refreshSweepMute();
     }
 
@@ -84,6 +86,10 @@ final class PulseChannel {
     void clockHalfFrame() {
         lengthCounter.clock(enabled);
         clockSweep();
+        if (reloadRequested) {
+            timerCounter = timerReload;
+            reloadRequested = false;
+        }
     }
 
     int output() {
@@ -102,19 +108,22 @@ final class PulseChannel {
     }
 
     private void clockSweep() {
+        if (!sweepEnabled || sweepShift == 0 || !lengthCounter.isActive()) {
+            return;
+        }
         if (sweepDivider == 0) {
             sweepDivider = sweepPeriod;
-            if (sweepEnabled && sweepShift > 0 && !sweepMuted) {
-                int target = calculateSweepTarget();
-                if (target >= 0 && target <= 0x7FF) {
-                    timerReload = target;
+            int target = calculateSweepTarget();
+            sweepOverflow = target > 0x7FF || target < 0;
+            if (!sweepOverflow && !sweepMuted) {
+                timerReload = target & 0x7FF;
+                if (!sweepNegate) {
                     timerCounter = timerReload;
                 }
             }
         } else {
             sweepDivider--;
         }
-
         if (sweepReload) {
             sweepDivider = sweepPeriod;
             sweepReload = false;
@@ -124,20 +133,11 @@ final class PulseChannel {
 
     private int calculateSweepTarget() {
         int change = timerReload >> sweepShift;
-        if (sweepNegate) {
-            int adjustment = onesComplementNegate ? 1 : 0;
-            return timerReload - change - adjustment;
-        }
-        return timerReload + change;
+        return sweepNegate ? timerReload - change - (onesComplementNegate ? 1 : 0) : timerReload + change;
     }
 
     private void refreshSweepMute() {
         boolean timerInvalid = timerReload < 8;
-        boolean overflow = false;
-        if (sweepEnabled && sweepShift > 0) {
-            int target = calculateSweepTarget();
-            overflow = target < 0 || target > 0x7FF;
-        }
-        sweepMuted = timerInvalid || overflow;
+        sweepMuted = timerInvalid || sweepOverflow;
     }
 }

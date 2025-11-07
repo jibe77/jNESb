@@ -2,20 +2,15 @@ package org.jnesb.apu;
 
 import java.util.function.IntUnaryOperator;
 
+/**
+ * APU amélioré avec timing plus précis et mixage audio correct
+ */
 public final class Apu {
 
+    // Le CPU de la NES tourne à ~1.789773 MHz
+    // L'APU génère des échantillons à cette fréquence divisée par 2
+    public static final double CPU_CLOCK_RATE = 1789773.0;
     public static final int QUARTER_FRAME_PERIOD = 7457;
-
-    private static final double PULSE1_LEFT = 0.85;
-    private static final double PULSE1_RIGHT = 0.15;
-    private static final double PULSE2_LEFT = 0.15;
-    private static final double PULSE2_RIGHT = 0.85;
-    private static final double TRIANGLE_LEFT = 0.52;
-    private static final double TRIANGLE_RIGHT = 0.48;
-    private static final double NOISE_LEFT = 0.4;
-    private static final double NOISE_RIGHT = 0.6;
-    private static final double DMC_LEFT = 0.5;
-    private static final double DMC_RIGHT = 0.5;
 
     private final FrameSequencer frameSequencer = new FrameSequencer();
     private final PulseChannel pulse1 = new PulseChannel(true);
@@ -23,13 +18,23 @@ public final class Apu {
     private final TriangleChannel triangle = new TriangleChannel();
     private final NoiseChannel noise = new NoiseChannel();
     private final DmcChannel dmc;
-    private final double[] stereoSample = new double[2];
 
-    private int statusRegister;
     private boolean irqInhibit;
     private boolean irqPending;
     private int quarterFrameCount;
     private int halfFrameCount;
+    private int statusRegister;
+    
+    // Filtre passe-haut pour éliminer le DC offset
+    private double highPassAccumulator = 0.0;
+    private static final double HIGH_PASS_ALPHA = 0.999835; // Cutoff ~90Hz à 44100Hz
+    
+    // Filtre passe-bas pour anti-aliasing
+    private double lowPassPrev = 0.0;
+    private static final double LOW_PASS_ALPHA = 0.815686; // Cutoff ~12kHz à 44100Hz
+
+    // Cycle counter pour un timing plus précis
+    private int cpuCycles = 0;
 
     public Apu() {
         this(address -> 0);
@@ -43,22 +48,38 @@ public final class Apu {
         frameSequencer.reset();
         statusRegister = 0;
         irqPending = false;
+        irqInhibit = false;
         quarterFrameCount = 0;
         halfFrameCount = 0;
+        cpuCycles = 0;
         pulse1.setEnabled(false);
         pulse2.setEnabled(false);
         triangle.setEnabled(false);
         noise.setEnabled(false);
         dmc.reset();
+        highPassAccumulator = 0.0;
+        lowPassPrev = 0.0;
     }
 
+    /**
+     * Clock l'APU. Doit être appelé à chaque cycle CPU.
+     */
     public void clock() {
-        pulse1.clock();
-        pulse2.clock();
+        cpuCycles++;
+        
+        // Triangle et DMC sont clockés à chaque cycle CPU
         triangle.clockTimer();
-        noise.clockTimer();
         dmc.clock();
+        
+        // Les générateurs de formes d'onde sont clockés tous les 2 cycles CPU
+        // Sur les cycles pairs (0, 2, 4, ...) on clock pulse et noise
+        if ((cpuCycles & 1) == 0) {
+            pulse1.clock();
+            pulse2.clock();
+            noise.clockTimer();
+        }
 
+        // Frame counter
         FrameEvent event = frameSequencer.tick();
         if (event.quarterFrame()) {
             quarterFrameCount++;
@@ -114,8 +135,21 @@ public final class Apu {
                 if (irqInhibit) {
                     irqPending = false;
                 }
-                frameSequencer.setMode((data & 0x80) != 0 ? FrameSequencer.Mode.FIVE_STEP
+                boolean newMode = (data & 0x80) != 0;
+                frameSequencer.setMode(newMode ? FrameSequencer.Mode.FIVE_STEP
                         : FrameSequencer.Mode.FOUR_STEP);
+                
+                // En mode 5-step, clock immédiatement les enveloppes et length counters
+                if (newMode) {
+                    pulse1.clockQuarterFrame();
+                    pulse2.clockQuarterFrame();
+                    triangle.quarterFrame();
+                    noise.quarterFrame();
+                    pulse1.clockHalfFrame();
+                    pulse2.clockHalfFrame();
+                    triangle.halfFrame();
+                    noise.halfFrame();
+                }
             }
             default -> {
             }
@@ -148,7 +182,6 @@ public final class Apu {
                 value |= 0x80;
             }
             irqPending = false;
-            dmc.clearIrq();
             return value;
         }
         return 0;
@@ -181,38 +214,110 @@ public final class Apu {
         return irqPending && !irqInhibit;
     }
 
-    public double[] sample() {
-        int pulse1Sample = pulse1.output();
-        int pulse2Sample = pulse2.output();
-        double pulseLeftSum = pulse1Sample * PULSE1_LEFT + pulse2Sample * PULSE2_LEFT;
-        double pulseRightSum = pulse1Sample * PULSE1_RIGHT + pulse2Sample * PULSE2_RIGHT;
-        double pulseLeft = pulseLeftSum == 0
+    /**
+     * Génère un échantillon audio avec mixage non-linéaire précis et filtrage
+     * TEMP: Filtrage désactivé pour debug
+     */
+    public double sample() {
+        // Utilisation des tables de mixage non-linéaire de la NES
+        // Ces formules reproduisent fidèlement le comportement du DAC hardware
+        
+        int pulse1Out = pulse1.output();
+        int pulse2Out = pulse2.output();
+        int pulseSum = pulse1Out + pulse2Out;
+        
+        // Formule précise pour les canaux pulse
+        double pulseOutput = 0.0;
+        if (pulseSum > 0) {
+            pulseOutput = 95.88 / ((8128.0 / pulseSum) + 100.0);
+        }
+        
+        // Canaux TND (Triangle, Noise, DMC)
+        int triangleOut = triangle.output();
+        int noiseOut = noise.output();
+        int dmcOut = (int) dmc.output();
+        
+        // Formule précise pour les canaux TND
+        double tndOutput = 0.0;
+        double tndSum = (triangleOut / 8227.0) + (noiseOut / 12241.0) + (dmcOut / 22638.0);
+        if (tndSum > 0) {
+            tndOutput = 159.79 / ((1.0 / tndSum) + 100.0);
+        }
+
+        // Mixage final SANS filtrage pour debug
+        double mixed = pulseOutput + tndOutput;
+        
+        // Normalisation finale
+        return mixed * 0.5;
+    }
+    
+    /**
+     * Version avec filtrage (à utiliser quand le debug est terminé)
+     */
+    public double sampleFiltered() {
+        // Utilisation des tables de mixage non-linéaire de la NES
+        int pulse1Out = pulse1.output();
+        int pulse2Out = pulse2.output();
+        int pulseSum = pulse1Out + pulse2Out;
+        
+        double pulseOutput = 0.0;
+        if (pulseSum > 0) {
+            pulseOutput = 95.88 / ((8128.0 / pulseSum) + 100.0);
+        }
+        
+        int triangleOut = triangle.output();
+        int noiseOut = noise.output();
+        int dmcOut = (int) dmc.output();
+        
+        double tndOutput = 0.0;
+        double tndSum = (triangleOut / 8227.0) + (noiseOut / 12241.0) + (dmcOut / 22638.0);
+        if (tndSum > 0) {
+            tndOutput = 159.79 / ((1.0 / tndSum) + 100.0);
+        }
+        
+        double mixed = pulseOutput + tndOutput;
+        
+        // Application du filtre passe-haut pour éliminer le DC offset
+        // Cela évite les "clics" et le son trop grave
+        double highPassInput = mixed;
+        double highPassOutput = highPassInput - highPassAccumulator;
+        highPassAccumulator = highPassInput - highPassOutput * HIGH_PASS_ALPHA;
+        
+        // Application du filtre passe-bas pour anti-aliasing
+        // Cela réduit les harmoniques haute fréquence stridentes
+        double lowPassOutput = lowPassPrev + LOW_PASS_ALPHA * (highPassOutput - lowPassPrev);
+        lowPassPrev = lowPassOutput;
+        
+        // Normalisation finale (la sortie est entre -1.0 et 1.0)
+        // Le volume peut être ajusté ici si nécessaire
+        return lowPassOutput * 0.5; // Réduction légère du volume pour éviter la saturation
+    }
+
+    /**
+     * Version alternative sans filtrage pour debug
+     */
+    public double sampleRaw() {
+        int pulseSum = pulse1.output() + pulse2.output();
+        double pulse = pulseSum == 0
                 ? 0.0
-                : 95.88 / ((8128.0 / pulseLeftSum) + 100.0);
-        double pulseRight = pulseRightSum == 0
-                ? 0.0
-                : 95.88 / ((8128.0 / pulseRightSum) + 100.0);
+                : 95.88 / ((8128.0 / pulseSum) + 100.0);
 
         int triangleSample = triangle.output();
         int noiseSample = noise.output();
-        double dmcSample = dmc.output();
+        int dmcSample = (int) dmc.output();
 
-        double tndLeftInput = (triangleSample * TRIANGLE_LEFT) / 8227.0
-                + (noiseSample * NOISE_LEFT) / 12241.0
-                + (dmcSample * DMC_LEFT) / 22638.0;
-        double tndRightInput = (triangleSample * TRIANGLE_RIGHT) / 8227.0
-                + (noiseSample * NOISE_RIGHT) / 12241.0
-                + (dmcSample * DMC_RIGHT) / 22638.0;
-        double tndLeft = tndLeftInput == 0.0
+        double tndInput = (triangleSample / 8227.0)
+                + (noiseSample / 12241.0)
+                + (dmcSample / 22638.0);
+        double tndComponent = tndInput == 0.0
                 ? 0.0
-                : 159.79 / ((1.0 / tndLeftInput) + 100.0);
-        double tndRight = tndRightInput == 0.0
-                ? 0.0
-                : 159.79 / ((1.0 / tndRightInput) + 100.0);
+                : 159.79 / ((1.0 / tndInput) + 100.0);
 
-        stereoSample[0] = pulseLeft + tndLeft;
-        stereoSample[1] = pulseRight + tndRight;
-        return stereoSample;
+        return pulse + tndComponent;
+    }
+
+    public int getCpuCycles() {
+        return cpuCycles;
     }
 
     private static final class FrameSequencer {
@@ -220,42 +325,78 @@ public final class Apu {
         private static final int MAX_FOUR_STEP = 4;
         private static final int MAX_FIVE_STEP = 5;
 
+        // Timing précis du frame counter en cycles CPU
+        // Mode 4-step: 7457, 14913, 22371, 29829 (29830 avec IRQ)
+        // Mode 5-step: 7457, 14913, 22371, 37281, 37282
+        private static final int[] FOUR_STEP_CYCLES = {7457, 14913, 22371, 29829, 29830};
+        private static final int[] FIVE_STEP_CYCLES = {7457, 14913, 22371, 37281, 37282};
+
         private Mode mode = Mode.FOUR_STEP;
-        private int cyclesUntilStep = QUARTER_FRAME_PERIOD;
+        private int cycleCounter = 0;
         private int stepIndex = 0;
 
         FrameEvent tick() {
-            if (--cyclesUntilStep > 0) {
+            cycleCounter++;
+            
+            int[] cycles = mode == Mode.FOUR_STEP ? FOUR_STEP_CYCLES : FIVE_STEP_CYCLES;
+            
+            if (cycleCounter < cycles[stepIndex]) {
                 return FrameEvent.NONE;
             }
 
-            cyclesUntilStep = QUARTER_FRAME_PERIOD;
+            boolean quarter = false;
+            boolean half = false;
+            boolean irq = false;
 
-            boolean quarter = true;
-            boolean half = (stepIndex == 1 || stepIndex == 3);
-            boolean irq = mode == Mode.FOUR_STEP && stepIndex == 3;
-
-            stepIndex++;
-            int max = mode == Mode.FOUR_STEP ? MAX_FOUR_STEP : MAX_FIVE_STEP;
-            if (stepIndex >= max) {
-                stepIndex = 0;
+            // Mode 4-step
+            if (mode == Mode.FOUR_STEP) {
+                switch (stepIndex) {
+                    case 0, 1, 2 -> {
+                        quarter = true;
+                        half = (stepIndex == 1);
+                    }
+                    case 3 -> {
+                        quarter = true;
+                        half = true;
+                    }
+                    case 4 -> {
+                        irq = true;
+                        cycleCounter = 0;
+                        stepIndex = 0;
+                        return new FrameEvent(false, false, irq);
+                    }
+                }
+            }
+            // Mode 5-step
+            else {
+                switch (stepIndex) {
+                    case 0, 2 -> quarter = true;
+                    case 1, 3 -> {
+                        quarter = true;
+                        half = true;
+                    }
+                    case 4 -> {
+                        cycleCounter = 0;
+                        stepIndex = 0;
+                        return FrameEvent.NONE;
+                    }
+                }
             }
 
+            stepIndex++;
             return new FrameEvent(quarter, half, irq);
         }
 
         void reset() {
             mode = Mode.FOUR_STEP;
-            cyclesUntilStep = QUARTER_FRAME_PERIOD;
+            cycleCounter = 0;
             stepIndex = 0;
         }
 
-        void setMode(Mode mode) {
-            if (this.mode != mode) {
-                this.mode = mode;
-                cyclesUntilStep = QUARTER_FRAME_PERIOD;
-                stepIndex = 0;
-            }
+        void setMode(Mode newMode) {
+            this.mode = newMode;
+            cycleCounter = 0;
+            stepIndex = 0;
         }
 
         enum Mode {
