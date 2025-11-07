@@ -9,18 +9,27 @@ final class PulseChannel {
             {1, 0, 0, 1, 1, 1, 1, 1}
     };
 
+    private final boolean onesComplementNegate;
     private final Envelope envelope = new Envelope();
     private final LengthCounter lengthCounter = new LengthCounter();
-    private final SweepUnit sweep;
 
     private boolean enabled;
     private int dutyMode;
     private int dutyStep;
-    private int timer;
     private int timerReload;
+    private int timerCounter;
 
-    PulseChannel(boolean negateOnesComplement) {
-        sweep = new SweepUnit(negateOnesComplement);
+    // Sweep unit registers/state
+    private boolean sweepEnabled;
+    private int sweepPeriod;
+    private boolean sweepNegate;
+    private int sweepShift;
+    private int sweepDivider;
+    private boolean sweepReload;
+    private boolean sweepMuted;
+
+    PulseChannel(boolean onesComplementNegate) {
+        this.onesComplementNegate = onesComplementNegate;
     }
 
     void writeControl(int data) {
@@ -30,11 +39,17 @@ final class PulseChannel {
     }
 
     void writeSweep(int data) {
-        sweep.write(data);
+        sweepEnabled = (data & 0x80) != 0;
+        sweepPeriod = (data >> 4) & 0x07;
+        sweepNegate = (data & 0x08) != 0;
+        sweepShift = data & 0x07;
+        sweepReload = true;
+        refreshSweepMute();
     }
 
     void writeTimerLow(int data) {
-        timerReload = (timerReload & 0xFF00) | (data & 0xFF);
+        timerReload = (timerReload & 0x0700) | (data & 0xFF);
+        refreshSweepMute();
     }
 
     void writeTimerHigh(int data) {
@@ -42,7 +57,8 @@ final class PulseChannel {
         lengthCounter.load((data >> 3) & 0x1F);
         envelope.start();
         dutyStep = 0;
-        timer = timerReload;
+        timerCounter = timerReload;
+        refreshSweepMute();
     }
 
     void setEnabled(boolean enabled) {
@@ -52,26 +68,26 @@ final class PulseChannel {
         }
     }
 
-    void clockTimer() {
-        if (timer == 0) {
-            timer = timerReload;
+    void clock() {
+        if (timerCounter == 0) {
+            timerCounter = timerReload;
             dutyStep = (dutyStep + 1) & 0x07;
         } else {
-            timer--;
+            timerCounter--;
         }
     }
 
-    void quarterFrame() {
+    void clockQuarterFrame() {
         envelope.clock();
     }
 
-    void halfFrame() {
+    void clockHalfFrame() {
         lengthCounter.clock(enabled);
-        sweep.clock(this);
+        clockSweep();
     }
 
     int output() {
-        if (!enabled || !lengthCounter.isActive() || timerReload < 8) {
+        if (!enabled || !lengthCounter.isActive() || sweepMuted || timerReload < 8) {
             return 0;
         }
         int[] duty = DUTY_CYCLES[dutyMode];
@@ -81,15 +97,47 @@ final class PulseChannel {
         return envelope.output();
     }
 
-    int timer() {
-        return timerReload;
-    }
-
-    void setTimer(int value) {
-        timerReload = value & 0x7FF;
-    }
-
     boolean isActive() {
-        return enabled && lengthCounter.isActive();
+        return enabled && lengthCounter.isActive() && !sweepMuted && timerReload >= 8;
+    }
+
+    private void clockSweep() {
+        if (sweepDivider == 0) {
+            sweepDivider = sweepPeriod;
+            if (sweepEnabled && sweepShift > 0 && !sweepMuted) {
+                int target = calculateSweepTarget();
+                if (target >= 0 && target <= 0x7FF) {
+                    timerReload = target;
+                    timerCounter = timerReload;
+                }
+            }
+        } else {
+            sweepDivider--;
+        }
+
+        if (sweepReload) {
+            sweepDivider = sweepPeriod;
+            sweepReload = false;
+        }
+        refreshSweepMute();
+    }
+
+    private int calculateSweepTarget() {
+        int change = timerReload >> sweepShift;
+        if (sweepNegate) {
+            int adjustment = onesComplementNegate ? 1 : 0;
+            return timerReload - change - adjustment;
+        }
+        return timerReload + change;
+    }
+
+    private void refreshSweepMute() {
+        boolean timerInvalid = timerReload < 8;
+        boolean overflow = false;
+        if (sweepEnabled && sweepShift > 0) {
+            int target = calculateSweepTarget();
+            overflow = target < 0 || target > 0x7FF;
+        }
+        sweepMuted = timerInvalid || overflow;
     }
 }

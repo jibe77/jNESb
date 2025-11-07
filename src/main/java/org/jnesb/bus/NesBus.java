@@ -1,5 +1,6 @@
 package org.jnesb.bus;
 
+import org.jnesb.AudioConfig;
 import org.jnesb.apu.Apu;
 import org.jnesb.cartridge.Cartridge;
 import org.jnesb.cpu.Cpu6502;
@@ -14,17 +15,25 @@ import org.jnesb.ppu.Ppu2C02;
  */
 public final class NesBus implements CpuBus {
 
+    private static final int AUDIO_BUFFER_CAPACITY = 4096;
+
     private final Cpu6502 cpu = new Cpu6502();
     private final Ppu2C02 ppu = new Ppu2C02();
     private final NesZapper zapper = NesZapper.attachedTo(ppu);
-    private final Apu apu = new Apu();
+    private final Apu apu;
     private final int[] cpuRam = new int[2048];
     private final NesController[] controllers = {new NesController(), new NesController()};
+    private final double[] audioSamples = new double[AUDIO_BUFFER_CAPACITY];
 
     private Cartridge cartridge;
     private long systemClockCounter = 0;
+    private double audioCycleAccumulator = 0.0;
+    private int audioSampleWriteIndex = 0;
+    private int audioSampleReadIndex = 0;
+    private int audioSampleCount = 0;
 
     public NesBus() {
+        apu = new Apu(this::dmcRead);
         cpu.connectBus(this);
     }
 
@@ -62,6 +71,7 @@ public final class NesBus implements CpuBus {
         }
         zapper.reset();
         systemClockCounter = 0;
+        resetAudioSamples();
     }
 
     public boolean clock() {
@@ -73,6 +83,7 @@ public final class NesBus implements CpuBus {
         if (systemClockCounter % 3 == 0) {
             cpu.clock();
             apu.clock();
+            accumulateAudioSample();
             if (apu.pollIrq()) {
                 cpu.irq();
             }
@@ -146,5 +157,48 @@ public final class NesBus implements CpuBus {
                 || address == 0x4017) {
             apu.cpuWrite(address, data);
         }
+    }
+
+    public boolean hasAudioSample() {
+        return audioSampleCount > 0;
+    }
+
+    public double pollAudioSample() {
+        if (audioSampleCount == 0) {
+            return 0.0;
+        }
+        double sample = audioSamples[audioSampleReadIndex];
+        audioSampleReadIndex = (audioSampleReadIndex + 1) % audioSamples.length;
+        audioSampleCount--;
+        return sample;
+    }
+
+    private int dmcRead(int address) {
+        return read(address, true) & 0xFF;
+    }
+
+    private void accumulateAudioSample() {
+        audioCycleAccumulator += 1.0;
+        while (audioCycleAccumulator >= AudioConfig.CPU_CYCLES_PER_SAMPLE) {
+            audioCycleAccumulator -= AudioConfig.CPU_CYCLES_PER_SAMPLE;
+            enqueueAudioSample(apu.sample());
+        }
+    }
+
+    private void enqueueAudioSample(double sample) {
+        if (audioSampleCount == audioSamples.length) {
+            audioSampleReadIndex = (audioSampleReadIndex + 1) % audioSamples.length;
+            audioSampleCount--;
+        }
+        audioSamples[audioSampleWriteIndex] = sample;
+        audioSampleWriteIndex = (audioSampleWriteIndex + 1) % audioSamples.length;
+        audioSampleCount++;
+    }
+
+    private void resetAudioSamples() {
+        audioCycleAccumulator = 0.0;
+        audioSampleWriteIndex = 0;
+        audioSampleReadIndex = 0;
+        audioSampleCount = 0;
     }
 }

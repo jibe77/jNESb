@@ -33,7 +33,6 @@ public final class JavaFxNesEmulator extends Application {
 
     private static final int DISPLAY_SCALE = 3;
     private static final long FRAME_NANOS = 16_666_667L;
-    private static final double CPU_FREQUENCY_NTSC = 1_789_773.0;
 
     private static NesBus sharedBus;
     private static CountDownLatch exitLatch;
@@ -50,8 +49,6 @@ public final class JavaFxNesEmulator extends Application {
     private NesZapper zapper;
     private final Map<KeyCode, Button> keyBindings = new EnumMap<>(KeyCode.class);
     private AudioOutput audioOutput;
-    private double audioTimer;
-    private double cyclesPerSample;
 
     public static void launchWith(NesBus bus) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -77,8 +74,6 @@ public final class JavaFxNesEmulator extends Application {
         configureDefaultKeyBindings();
         this.audioOutput = new AudioOutput();
         this.audioOutput.start();
-        this.cyclesPerSample = CPU_FREQUENCY_NTSC / AudioOutput.SAMPLE_RATE;
-        this.audioTimer = 0;
 
         StackPane root = new StackPane(canvas);
         stage.setTitle("jNESb");
@@ -132,15 +127,8 @@ public final class JavaFxNesEmulator extends Application {
         long nextFrameTarget = System.nanoTime() + FRAME_NANOS;
 
         while (running) {
-            boolean cpuClocked = bus.clock();
-            if (cpuClocked) {
-                audioTimer += 1;
-                if (audioTimer >= cyclesPerSample) {
-                    audioTimer -= cyclesPerSample;
-                    double sample = bus.apu().sample();
-                    audioOutput.submitSample(sample);
-                }
-            }
+            bus.clock();
+            drainAudioSamples();
             if (ppu.isFrameComplete()) {
                 ppu.copyScreenRgb(rgbBuffer);
                 ppu.clearFrameFlag();
@@ -191,6 +179,16 @@ public final class JavaFxNesEmulator extends Application {
             argb[i] = (0xFF << 24) | (argb[i] & 0x00FFFFFF);
         }
         return argb;
+    }
+
+    private void drainAudioSamples() {
+        if (audioOutput == null) {
+            return;
+        }
+        while (bus.hasAudioSample()) {
+            double sample = bus.pollAudioSample();
+            audioOutput.submitSample(sample);
+        }
     }
 
     private void handleMouseMove(MouseEvent event) {

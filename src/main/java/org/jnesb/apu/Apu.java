@@ -1,5 +1,7 @@
 package org.jnesb.apu;
 
+import java.util.function.IntUnaryOperator;
+
 public final class Apu {
 
     public static final int QUARTER_FRAME_PERIOD = 7457;
@@ -8,12 +10,22 @@ public final class Apu {
     private final PulseChannel pulse1 = new PulseChannel(true);
     private final PulseChannel pulse2 = new PulseChannel(false);
     private final TriangleChannel triangle = new TriangleChannel();
+    private final NoiseChannel noise = new NoiseChannel();
+    private final DmcChannel dmc;
 
     private int statusRegister;
     private boolean irqInhibit;
     private boolean irqPending;
     private int quarterFrameCount;
     private int halfFrameCount;
+
+    public Apu() {
+        this(address -> 0);
+    }
+
+    public Apu(IntUnaryOperator dmcReader) {
+        this.dmc = new DmcChannel(dmcReader);
+    }
 
     public void reset() {
         frameSequencer.reset();
@@ -24,25 +36,31 @@ public final class Apu {
         pulse1.setEnabled(false);
         pulse2.setEnabled(false);
         triangle.setEnabled(false);
+        noise.setEnabled(false);
+        dmc.reset();
     }
 
     public void clock() {
-        pulse1.clockTimer();
-        pulse2.clockTimer();
+        pulse1.clock();
+        pulse2.clock();
         triangle.clockTimer();
+        noise.clockTimer();
+        dmc.clock();
 
         FrameEvent event = frameSequencer.tick();
         if (event.quarterFrame()) {
             quarterFrameCount++;
-            pulse1.quarterFrame();
-            pulse2.quarterFrame();
+            pulse1.clockQuarterFrame();
+            pulse2.clockQuarterFrame();
             triangle.quarterFrame();
+            noise.quarterFrame();
         }
         if (event.halfFrame()) {
             halfFrameCount++;
-            pulse1.halfFrame();
-            pulse2.halfFrame();
+            pulse1.clockHalfFrame();
+            pulse2.clockHalfFrame();
             triangle.halfFrame();
+            noise.halfFrame();
         }
         if (event.irq() && !irqInhibit) {
             irqPending = true;
@@ -63,11 +81,20 @@ public final class Apu {
             case 0x08 -> triangle.writeControl(data);
             case 0x0A -> triangle.writeTimerLow(data);
             case 0x0B -> triangle.writeTimerHigh(data);
+            case 0x0C -> noise.writeControl(data);
+            case 0x0E -> noise.writePeriod(data);
+            case 0x0F -> noise.writeLength(data);
+            case 0x10 -> dmc.writeControl(data);
+            case 0x11 -> dmc.writeDirectLoad(data);
+            case 0x12 -> dmc.writeSampleAddress(data);
+            case 0x13 -> dmc.writeSampleLength(data);
             case 0x15 -> {
                 statusRegister = data & 0x1F;
                 pulse1.setEnabled((data & 0x01) != 0);
                 pulse2.setEnabled((data & 0x02) != 0);
                 triangle.setEnabled((data & 0x04) != 0);
+                noise.setEnabled((data & 0x08) != 0);
+                dmc.setEnabled((data & 0x10) != 0);
                 irqPending = false;
             }
             case 0x17 -> {
@@ -96,18 +123,35 @@ public final class Apu {
             if (triangle.isActive()) {
                 value |= 0x04;
             }
+            if (noise.isActive()) {
+                value |= 0x08;
+            }
+            if (dmc.isActive()) {
+                value |= 0x10;
+            }
             if (irqPending && !irqInhibit) {
                 value |= 0x40;
             }
+            if (dmc.isIrqPending()) {
+                value |= 0x80;
+            }
             irqPending = false;
+            dmc.clearIrq();
             return value;
         }
         return 0;
     }
 
     public boolean pollIrq() {
-        if (irqPending && !irqInhibit) {
-            irqPending = false;
+        boolean frameIrq = irqPending && !irqInhibit;
+        boolean dmcIrq = dmc.isIrqPending();
+        if (frameIrq || dmcIrq) {
+            if (frameIrq) {
+                irqPending = false;
+            }
+            if (dmcIrq) {
+                dmc.clearIrq();
+            }
             return true;
         }
         return false;
@@ -128,8 +172,20 @@ public final class Apu {
     public double sample() {
         int pulseSum = pulse1.output() + pulse2.output();
         int triangleSample = triangle.output();
-        double pulseComponent = pulseSum == 0 ? 0.0 : 95.88 / ((8128.0 / pulseSum) + 100.0);
-        double tndComponent = triangleSample == 0 ? 0.0 : 159.79 / ((1.0 / (triangleSample / 8227.0)) + 100.0);
+        int noiseSample = noise.output();
+        int dmcSample = dmc.output();
+
+        double pulseComponent = pulseSum == 0
+                ? 0.0
+                : 95.88 / ((8128.0 / pulseSum) + 100.0);
+
+        double tndInput = (triangleSample / 8227.0)
+                + (noiseSample / 12241.0)
+                + (dmcSample / 22638.0);
+        double tndComponent = tndInput == 0.0
+                ? 0.0
+                : 159.79 / ((1.0 / tndInput) + 100.0);
+
         return pulseComponent + tndComponent;
     }
 

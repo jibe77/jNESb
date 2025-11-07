@@ -7,12 +7,14 @@ import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 
+import org.jnesb.AudioConfig;
+
 /**
  * Minimal PCM audio output for the NES APU sample stream.
  */
 public final class AudioOutput implements AutoCloseable {
 
-    public static final float SAMPLE_RATE = 44100.0f;
+    public static final float SAMPLE_RATE = AudioConfig.SAMPLE_RATE;
     private static final AudioFormat FORMAT = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
 
     private final byte[] buffer = new byte[4096];

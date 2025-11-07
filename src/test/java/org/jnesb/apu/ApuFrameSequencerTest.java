@@ -54,12 +54,15 @@ final class ApuFrameSequencerTest {
         apu.cpuWrite(0x4000, 0x30);
         apu.cpuWrite(0x4002, 0xFF);
         apu.cpuWrite(0x4003, 0x08);
-        apu.cpuWrite(0x4015, 0x01);
+        apu.cpuWrite(0x400C, 0x30);
+        apu.cpuWrite(0x400E, 0x00);
+        apu.cpuWrite(0x400F, 0x00);
+        apu.cpuWrite(0x4015, 0x09);
 
-        assertEquals(0x01, apu.cpuRead(0x4015) & 0x01);
+        assertEquals(0x09, apu.cpuRead(0x4015) & 0x0F);
 
         apu.cpuWrite(0x4015, 0x00);
-        assertEquals(0x00, apu.cpuRead(0x4015) & 0x01);
+        assertEquals(0x00, apu.cpuRead(0x4015) & 0x0F);
     }
 
     private static void clock(Apu apu, int cycles) {
