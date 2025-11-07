@@ -20,7 +20,7 @@ final class NesBusControllerTest {
 
         int[] expected = {1, 0, 0, 1};
         for (int value : expected) {
-            assertEquals(value, bus.read(0x4016, false));
+            assertEquals(value, bus.read(0x4016, false) & 0x01);
         }
     }
 
@@ -33,7 +33,7 @@ final class NesBusControllerTest {
         bus.write(0x4016, 1);
         bus.write(0x4016, 0);
 
-        assertEquals(0, bus.read(0x4016, false));
-        assertEquals(1, bus.read(0x4017, false));
+        assertEquals(0, bus.read(0x4016, false) & 0x01);
+        assertEquals(1, bus.read(0x4017, false) & 0x01);
     }
 }

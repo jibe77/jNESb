@@ -133,6 +133,10 @@ public final class Ppu2C02 {
         return screenSprite;
     }
 
+    public int sampleScreenPixel(int x, int y) {
+        return screenSprite.getPixel(x, y);
+    }
+
     public void copyScreenRgb(int[] target) {
         if (target == null || target.length < screenSprite.width() * screenSprite.height()) {
             return;

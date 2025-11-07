@@ -9,6 +9,7 @@ import java.util.concurrent.locks.LockSupport;
 
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.scene.Cursor;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -16,6 +17,8 @@ import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
@@ -23,6 +26,7 @@ import org.jnesb.audio.AudioOutput;
 import org.jnesb.bus.NesBus;
 import org.jnesb.input.NesController;
 import org.jnesb.input.NesController.Button;
+import org.jnesb.input.NesZapper;
 import org.jnesb.ppu.Ppu2C02;
 
 public final class JavaFxNesEmulator extends Application {
@@ -43,6 +47,7 @@ public final class JavaFxNesEmulator extends Application {
     private WritableImage frameImage;
     private int[] rgbBuffer;
     private NesController controller1;
+    private NesZapper zapper;
     private final Map<KeyCode, Button> keyBindings = new EnumMap<>(KeyCode.class);
     private AudioOutput audioOutput;
     private double audioTimer;
@@ -65,6 +70,7 @@ public final class JavaFxNesEmulator extends Application {
         this.bus = Objects.requireNonNull(sharedBus, "sharedBus");
         this.ppu = bus.ppu();
         this.controller1 = bus.controller(0);
+        this.zapper = bus.zapper();
         this.rgbBuffer = new int[Ppu2C02.SCREEN_WIDTH * Ppu2C02.SCREEN_HEIGHT];
         this.frameImage = new WritableImage(Ppu2C02.SCREEN_WIDTH, Ppu2C02.SCREEN_HEIGHT);
         this.canvas = new Canvas(Ppu2C02.SCREEN_WIDTH * DISPLAY_SCALE, Ppu2C02.SCREEN_HEIGHT * DISPLAY_SCALE);
@@ -79,6 +85,16 @@ public final class JavaFxNesEmulator extends Application {
         Scene scene = new Scene(root);
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handleKey(event, true));
         scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> handleKey(event, false));
+        scene.setCursor(Cursor.CROSSHAIR);
+        canvas.setOnMouseMoved(this::handleMouseMove);
+        canvas.setOnMouseDragged(this::handleMouseMove);
+        canvas.setOnMousePressed(this::handleMousePressed);
+        canvas.setOnMouseReleased(this::handleMouseReleased);
+        canvas.setOnMouseExited(event -> {
+            if (zapper != null) {
+                zapper.aimAt(-1, -1);
+            }
+        });
         stage.setScene(scene);
         stage.setResizable(false);
         stage.setOnCloseRequest(event -> running = false);
@@ -175,5 +191,46 @@ public final class JavaFxNesEmulator extends Application {
             argb[i] = (0xFF << 24) | (argb[i] & 0x00FFFFFF);
         }
         return argb;
+    }
+
+    private void handleMouseMove(MouseEvent event) {
+        if (zapper == null) {
+            return;
+        }
+        updateZapperAim(event);
+    }
+
+    private void handleMousePressed(MouseEvent event) {
+        if (zapper == null || event.getButton() != MouseButton.PRIMARY) {
+            return;
+        }
+        zapper.setTriggerPressed(true);
+        updateZapperAim(event);
+    }
+
+    private void handleMouseReleased(MouseEvent event) {
+        if (zapper == null || event.getButton() != MouseButton.PRIMARY) {
+            return;
+        }
+        zapper.setTriggerPressed(false);
+        updateZapperAim(event);
+    }
+
+    private void updateZapperAim(MouseEvent event) {
+        double width = canvas.getWidth();
+        double height = canvas.getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        double scaleX = width / Ppu2C02.SCREEN_WIDTH;
+        double scaleY = height / Ppu2C02.SCREEN_HEIGHT;
+        if (scaleX == 0 || scaleY == 0) {
+            return;
+        }
+        double eventX = event.getX();
+        double eventY = event.getY();
+        int targetX = (int) Math.floor(eventX / scaleX);
+        int targetY = (int) Math.floor(eventY / scaleY);
+        zapper.aimAt(targetX, targetY);
     }
 }

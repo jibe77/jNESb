@@ -5,6 +5,7 @@ import org.jnesb.cartridge.Cartridge;
 import org.jnesb.cpu.Cpu6502;
 import org.jnesb.cpu.CpuBus;
 import org.jnesb.input.NesController;
+import org.jnesb.input.NesZapper;
 import org.jnesb.ppu.Ppu2C02;
 
 /**
@@ -15,6 +16,7 @@ public final class NesBus implements CpuBus {
 
     private final Cpu6502 cpu = new Cpu6502();
     private final Ppu2C02 ppu = new Ppu2C02();
+    private final NesZapper zapper = NesZapper.attachedTo(ppu);
     private final Apu apu = new Apu();
     private final int[] cpuRam = new int[2048];
     private final NesController[] controllers = {new NesController(), new NesController()};
@@ -38,6 +40,10 @@ public final class NesBus implements CpuBus {
         return apu;
     }
 
+    public NesZapper zapper() {
+        return zapper;
+    }
+
     public void insertCartridge(Cartridge cartridge) {
         this.cartridge = cartridge;
         ppu.connectCartridge(cartridge);
@@ -54,6 +60,7 @@ public final class NesBus implements CpuBus {
         for (NesController controller : controllers) {
             controller.reset();
         }
+        zapper.reset();
         systemClockCounter = 0;
     }
 
@@ -99,7 +106,12 @@ public final class NesBus implements CpuBus {
         }
 
         if (address == 0x4016 || address == 0x4017) {
-            return controllers[address - 0x4016].read() & 0x01;
+            int port = address - 0x4016;
+            int data = controllers[port].read() & 0x01;
+            if (port == 1) {
+                data |= zapper.read();
+            }
+            return data;
         }
 
         return 0x00;
