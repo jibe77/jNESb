@@ -24,6 +24,7 @@ public final class Cartridge {
     private final int prgBanks;
     private final int chrBanks;
     private final byte[] prgMemory;
+    private final byte[] prgRam;
     private final byte[] chrMemory;
     private final Mapper mapper;
     private Mirror mirror;
@@ -34,6 +35,7 @@ public final class Cartridge {
                       int prgBanks,
                       int chrBanks,
                       byte[] prgMemory,
+                      byte[] prgRam,
                       byte[] chrMemory,
                       Mapper mapper,
                       Mirror mirror,
@@ -42,6 +44,7 @@ public final class Cartridge {
         this.prgBanks = prgBanks;
         this.chrBanks = chrBanks;
         this.prgMemory = prgMemory;
+        this.prgRam = prgRam;
         this.chrMemory = chrMemory;
         this.mapper = mapper;
         this.mirror = mirror;
@@ -61,7 +64,7 @@ public final class Cartridge {
         Header header = Header.read(inputStream);
 
         if (!header.valid) {
-            return new Cartridge(0, 0, 0, new byte[0], new byte[0], null, Mirror.HORIZONTAL, false);
+            return new Cartridge(0, 0, 0, new byte[0], new byte[0], new byte[0], null, Mirror.HORIZONTAL, false);
         }
 
         // Skip trainer if present
@@ -75,6 +78,7 @@ public final class Cartridge {
         // iNES 1.0
         int prgBanks = header.prgRomChunks & 0xFF;
         byte[] prgMemory = readFully(inputStream, prgBanks * 16 * 1024);
+        byte[] prgRam = new byte[8 * 1024];
 
         int chrBanks = header.chrRomChunks & 0xFF;
         byte[] chrMemory = readFully(inputStream, chrBanks * 8 * 1024);
@@ -89,7 +93,7 @@ public final class Cartridge {
             default -> throw new IOException("Unsupported mapper: " + mapperId);
         };
 
-        return new Cartridge(mapperId, prgBanks, chrBanks, prgMemory, chrMemory, mapper, mirror, true);
+        return new Cartridge(mapperId, prgBanks, chrBanks, prgMemory, prgRam, chrMemory, mapper, mirror, true);
     }
 
     public boolean isImageValid() {
@@ -112,18 +116,29 @@ public final class Cartridge {
     }
 
     public boolean cpuRead(int address, int[] dataOut) {
-        int mapped = mapper.cpuMapRead(address & 0xFFFF);
+        address &= 0xFFFF;
+        int mapped = mapper.cpuMapRead(address);
         if (mapped >= 0) {
             dataOut[0] = prgMemory[mapped] & 0xFF;
+            return true;
+        }
+        if (address >= 0x6000 && address <= 0x7FFF) {
+            dataOut[0] = prgRam[address & 0x1FFF] & 0xFF;
             return true;
         }
         return false;
     }
 
     public boolean cpuWrite(int address, int value) {
-        int mapped = mapper.cpuMapWrite(address & 0xFFFF, value & 0xFF);
+        address &= 0xFFFF;
+        value &= 0xFF;
+        int mapped = mapper.cpuMapWrite(address, value);
         if (mapped >= 0) {
             prgMemory[mapped] = (byte) value;
+            return true;
+        }
+        if (address >= 0x6000 && address <= 0x7FFF) {
+            prgRam[address & 0x1FFF] = (byte) value;
             return true;
         }
         return false;

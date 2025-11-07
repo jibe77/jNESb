@@ -11,6 +11,8 @@ jNESb is a from-scratch Nintendo Entertainment System emulator written in Java. 
 
 ![Donkey Kong on jNESb](dk.png)
 
+![Zelda on jNESb](z.png)
+
 ## Requirements
 - JDK 21 or newer (the project targets release level 25 via the Maven compiler plugin).
 - Maven 3.9.11+.
