@@ -361,8 +361,17 @@ public final class Ppu2C02 {
         if ((visibleScanline || preRenderLine) && cycle > 0 && cycle < 341) {
             if ((cycle >= 2 && cycle <= 257) || (cycle >= 321 && cycle <= 337)) {
                 updateBackgroundShifters();
-                if (visibleScanline) {
-                    updateSpriteShifters();
+                
+                // CORRECTION: Mise à jour des compteurs X et shift des sprites AVANT le rendu
+                if (visibleScanline && cycle >= 1 && cycle < 258 && isSpriteRenderingEnabled()) {
+                    for (int i = 0; i < spriteCount; i++) {
+                        if (spriteXCounter[i] > 0) {
+                            spriteXCounter[i]--;
+                        } else {
+                            spriteShifterPatternLow[i] = (spriteShifterPatternLow[i] << 1) & 0xFF;
+                            spriteShifterPatternHigh[i] = (spriteShifterPatternHigh[i] << 1) & 0xFF;
+                        }
+                    }
                 }
 
                 switch ((cycle - 1) & 0x07) {
@@ -442,9 +451,9 @@ public final class Ppu2C02 {
         if (isSpriteRenderingEnabled()) {
             for (int i = 0; i < spriteCount; i++) {
                 if (spriteXCounter[i] == 0) {
-                    int lo = (spriteShifterPatternLow[i] & 0x80) >> 7;
-                    int hi = (spriteShifterPatternHigh[i] & 0x80) >> 6;
-                    int pixel = hi | lo;
+                    int lo = (spriteShifterPatternLow[i] & 0x80) != 0 ? 1 : 0;
+                    int hi = (spriteShifterPatternHigh[i] & 0x80) != 0 ? 1 : 0;
+                    int pixel = (hi << 1) | lo;
                     if (pixel != 0) {
                         spritePixel = pixel;
                         spritePalette = (spriteAttributes[i] & 0x03) + 0x04;
@@ -545,20 +554,6 @@ public final class Ppu2C02 {
         bgShifterPatternHigh = ((bgShifterPatternHigh << 1) & 0xFFFF);
         bgShifterAttributeLow = ((bgShifterAttributeLow << 1) & 0xFFFF);
         bgShifterAttributeHigh = ((bgShifterAttributeHigh << 1) & 0xFFFF);
-    }
-
-    private void updateSpriteShifters() {
-        if (!isSpriteRenderingEnabled()) {
-            return;
-        }
-        for (int i = 0; i < spriteCount; i++) {
-            if (spriteXCounter[i] > 0) {
-                spriteXCounter[i]--;
-            } else {
-                spriteShifterPatternLow[i] = ((spriteShifterPatternLow[i] << 1) & 0xFF);
-                spriteShifterPatternHigh[i] = ((spriteShifterPatternHigh[i] << 1) & 0xFF);
-            }
-        }
     }
 
     private void loadBackgroundShifters() {
@@ -698,8 +693,8 @@ public final class Ppu2C02 {
                 patternLow = reverseByte(patternLow);
                 patternHigh = reverseByte(patternHigh);
             }
-            spriteShifterPatternLow[i] = patternLow & 0xFF;
-            spriteShifterPatternHigh[i] = patternHigh & 0xFF;
+            spriteShifterPatternLow[i] = (patternLow & 0xFF);
+            spriteShifterPatternHigh[i] = (patternHigh & 0xFF);
         }
     }
 
