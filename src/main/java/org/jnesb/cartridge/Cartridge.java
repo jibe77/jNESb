@@ -51,6 +51,7 @@ public final class Cartridge {
         this.imageValid = imageValid;
         if (this.mapper != null) {
             this.mapper.setMirrorListener(this::applyMirror);
+            this.mapper.reset();
         }
     }
 
@@ -90,6 +91,10 @@ public final class Cartridge {
         Mapper mapper = switch (mapperId) {
             case 0 -> new Mapper0(prgBanks, chrBanks);
             case 1 -> new Mapper1(prgBanks, chrBanks);
+            case 2 -> new Mapper2(prgBanks, chrBanks);
+            case 3 -> new Mapper3(prgBanks, chrBanks);
+            case 4 -> new Mapper4(prgBanks, chrBanks);
+            case 66 -> new Mapper66(prgBanks, chrBanks);
             default -> throw new IOException("Unsupported mapper: " + mapperId);
         };
 
@@ -102,6 +107,28 @@ public final class Cartridge {
 
     public Mirror mirror() {
         return mirror;
+    }
+
+    public void reset() {
+        if (mapper != null) {
+            mapper.reset();
+        }
+    }
+
+    public void scanline() {
+        if (mapper != null) {
+            mapper.onScanline();
+        }
+    }
+
+    public boolean pollIrq() {
+        return mapper != null && mapper.isIrqAsserted();
+    }
+
+    public void clearIrq() {
+        if (mapper != null) {
+            mapper.clearIrq();
+        }
     }
 
     public void setMirrorConsumer(Consumer<Mirror> consumer) {

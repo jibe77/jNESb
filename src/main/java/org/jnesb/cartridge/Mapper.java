@@ -50,6 +50,35 @@ public abstract class Mapper {
      */
     public abstract int ppuMapWrite(int address);
 
+    /**
+     * Resets mapper-specific state. Default implementation does nothing.
+     */
+    public void reset() {
+        // Default no-op
+    }
+
+    /**
+     * Called once per visible scanline when rendering is enabled (Mapper 4 IRQs, etc).
+     * Default implementation does nothing.
+     */
+    public void onScanline() {
+        // Default no-op
+    }
+
+    /**
+     * @return {@code true} if the mapper is asserting an IRQ.
+     */
+    public boolean isIrqAsserted() {
+        return false;
+    }
+
+    /**
+     * Clears the mapper IRQ request if one is pending. Default implementation does nothing.
+     */
+    public void clearIrq() {
+        // Default no-op
+    }
+
     public void setMirrorListener(MirrorListener listener) {
         this.mirrorListener = Objects.requireNonNull(listener, "listener");
     }

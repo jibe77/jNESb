@@ -511,6 +511,12 @@ public final class Ppu2C02 {
         }
 
         cycle++;
+        if (cartridge != null
+                && scanline >= 0 && scanline < 240
+                && cycle == 260
+                && ((mask & (MASK_RENDER_BACKGROUND | MASK_RENDER_SPRITES)) != 0)) {
+            cartridge.scanline();
+        }
 
         if (cycle >= 341) {
             cycle = 0;

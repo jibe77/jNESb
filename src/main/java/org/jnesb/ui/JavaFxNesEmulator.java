@@ -83,7 +83,6 @@ public final class JavaFxNesEmulator extends Application {
         Scene scene = new Scene(root);
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handleKey(event, true));
         scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> handleKey(event, false));
-        scene.setCursor(Cursor.CROSSHAIR);
         canvas.setOnMouseMoved(this::handleMouseMove);
         canvas.setOnMouseDragged(this::handleMouseMove);
         canvas.setOnMousePressed(this::handleMousePressed);
@@ -93,6 +92,10 @@ public final class JavaFxNesEmulator extends Application {
                 zapper.aimAt(-1, -1);
             }
         });
+        
+        // TODO : customize cursor for zapper
+        // canvas.setCursor(Cursor.CROSSHAIR);
+        
         stage.setScene(scene);
         stage.setResizable(false);
         stage.setOnCloseRequest(event -> running = false);

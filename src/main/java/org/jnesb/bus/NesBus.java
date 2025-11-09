@@ -67,6 +67,9 @@ public final class NesBus implements CpuBus {
         cpu.reset();
         ppu.reset();
         apu.reset();
+        if (cartridge != null) {
+            cartridge.reset();
+        }
         for (NesController controller : controllers) {
             controller.reset();
         }
@@ -86,6 +89,10 @@ public final class NesBus implements CpuBus {
             apu.clock();
             accumulateAudioSample();
             if (apu.pollIrq()) {
+                cpu.irq();
+            }
+            if (cartridge != null && cartridge.pollIrq()) {
+                cartridge.clearIrq();
                 cpu.irq();
             }
             cpuClocked = true;
