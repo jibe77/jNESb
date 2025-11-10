@@ -78,4 +78,8 @@ public final class NesController {
     private int booleanToBit(Button button) {
         return Boolean.TRUE.equals(buttonStates.get(button)) ? 1 : 0;
     }
+
+    public Map<Button, Boolean> snapshotButtonStates() {
+        return new EnumMap<>(buttonStates);
+    }
 }

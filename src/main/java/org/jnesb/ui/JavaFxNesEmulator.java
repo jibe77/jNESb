@@ -13,17 +13,24 @@ import javafx.scene.Cursor;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
 import org.jnesb.audio.AudioOutput;
 import org.jnesb.bus.NesBus;
+import org.jnesb.cpu.Cpu6502;
 import org.jnesb.input.NesController;
 import org.jnesb.input.NesController.Button;
 import org.jnesb.input.NesZapper;
@@ -51,6 +58,7 @@ public final class JavaFxNesEmulator extends Application {
     private AudioOutput audioOutput;
     private Thread audioThread;
     private volatile boolean audioThreadRunning;
+    private Stage primaryStage;
 
     public static void launchWith(NesBus bus) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -67,6 +75,7 @@ public final class JavaFxNesEmulator extends Application {
     @Override
     public void start(Stage stage) {
         this.bus = Objects.requireNonNull(sharedBus, "sharedBus");
+        this.primaryStage = stage;
         this.ppu = bus.ppu();
         this.controller1 = bus.controller(0);
         this.zapper = bus.zapper();
@@ -78,7 +87,10 @@ public final class JavaFxNesEmulator extends Application {
         this.audioOutput.start();
         startAudioThread();
 
-        StackPane root = new StackPane(canvas);
+        StackPane canvasHolder = new StackPane(canvas);
+        BorderPane root = new BorderPane();
+        root.setCenter(canvasHolder);
+        root.setTop(buildMenuBar());
         stage.setTitle("jNESb");
         Scene scene = new Scene(root);
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handleKey(event, true));
@@ -92,9 +104,7 @@ public final class JavaFxNesEmulator extends Application {
                 zapper.aimAt(-1, -1);
             }
         });
-        
-        // TODO : customize cursor for zapper
-        // canvas.setCursor(Cursor.CROSSHAIR);
+        canvas.setCursor(Cursor.CROSSHAIR);
         
         stage.setScene(scene);
         stage.setResizable(false);
@@ -185,6 +195,101 @@ public final class JavaFxNesEmulator extends Application {
             argb[i] = (0xFF << 24) | (argb[i] & 0x00FFFFFF);
         }
         return argb;
+    }
+
+    private MenuBar buildMenuBar() {
+        Menu gameMenu = new Menu("Game");
+        MenuItem loadGame = new MenuItem("Load Game");
+        loadGame.setOnAction(event -> handleLoadGame());
+        MenuItem resetGame = new MenuItem("Reset");
+        resetGame.setOnAction(event -> handleResetGame());
+        gameMenu.getItems().addAll(loadGame, resetGame);
+
+        Menu inputMenu = new Menu("Input");
+        Menu configureMenu = new Menu("Configure");
+        MenuItem configurePlayer1 = new MenuItem("Input 1st player");
+        configurePlayer1.setOnAction(event -> showInputConfigurationDialog(0));
+        MenuItem configurePlayer2 = new MenuItem("Input 2nd player");
+        configurePlayer2.setOnAction(event -> showInputConfigurationDialog(1));
+        configureMenu.getItems().addAll(configurePlayer1, configurePlayer2);
+        inputMenu.getItems().add(configureMenu);
+
+        Menu debugMenu = new Menu("Debug");
+        MenuItem inputRegisterItem = new MenuItem("Input Register");
+        inputRegisterItem.setOnAction(event -> showInputRegisterDialog());
+        MenuItem cpuRegisterItem = new MenuItem("CPU register");
+        cpuRegisterItem.setOnAction(event -> showCpuRegisterDialog());
+        debugMenu.getItems().addAll(inputRegisterItem, cpuRegisterItem);
+
+        return new MenuBar(gameMenu, inputMenu, debugMenu);
+    }
+
+    private void handleLoadGame() {
+        showInfoAlert("Load Game",
+                "Load Game",
+                "Loading a new ROM from the UI is not supported yet.\n"
+                        + "Please restart jNESb with the desired ROM path.");
+    }
+
+    private void handleResetGame() {
+        if (bus != null) {
+            bus.reset();
+        }
+    }
+
+    private void showInputConfigurationDialog(int playerIndex) {
+        NesController controller = bus.controller(playerIndex);
+        Map<Button, Boolean> states = controller.snapshotButtonStates();
+        StringBuilder content = new StringBuilder();
+        states.forEach((button, pressed) ->
+                content.append(button.name()).append(" : ").append(pressed ? "pressed" : "released").append('\n'));
+        showInfoAlert("Input Configuration",
+                "Player " + (playerIndex + 1) + " bindings (read-only)",
+                content.toString());
+    }
+
+    private void showInputRegisterDialog() {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < 2; i++) {
+            NesController controller = bus.controller(i);
+            builder.append("Player ").append(i + 1).append('\n');
+            controller.snapshotButtonStates().forEach((button, pressed) ->
+                    builder.append("  ")
+                            .append(button.name())
+                            .append(" : ")
+                            .append(pressed ? "1" : "0")
+                            .append('\n'));
+            builder.append('\n');
+        }
+        showInfoAlert("Input Register", "Controller button states", builder.toString());
+    }
+
+    private void showCpuRegisterDialog() {
+        Cpu6502 cpu = bus.cpu();
+        String content = "PC : $" + formatHex(cpu.pc, 4)
+                + "\nA  : $" + formatHex(cpu.a, 2)
+                + "\nX  : $" + formatHex(cpu.x, 2)
+                + "\nY  : $" + formatHex(cpu.y, 2)
+                + "\nSP : $" + formatHex(cpu.stkp, 2)
+                + "\nP  : $" + formatHex(cpu.status, 2);
+        showInfoAlert("CPU register", "6502 register snapshot", content);
+    }
+
+    private void showInfoAlert(String title, String header, String content) {
+        Alert alert = new Alert(AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        if (primaryStage != null) {
+            alert.initOwner(primaryStage);
+        }
+        alert.showAndWait();
+    }
+
+    private static String formatHex(int value, int width) {
+        int bits = Math.min(width * 4, 16);
+        int mask = (1 << bits) - 1;
+        return String.format("%0" + width + "X", value & mask);
     }
 
     private void startAudioThread() {
