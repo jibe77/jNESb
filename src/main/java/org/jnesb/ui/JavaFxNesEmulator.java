@@ -1,5 +1,6 @@
 package org.jnesb.ui;
 
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.Map;
@@ -15,6 +16,8 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.geometry.Insets;
+import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
@@ -43,6 +46,7 @@ public final class JavaFxNesEmulator extends Application {
 
     private static NesBus sharedBus;
     private static CountDownLatch exitLatch;
+    private static Path sharedRomPath;
 
     private NesBus bus;
     private Ppu2C02 ppu;
@@ -59,14 +63,16 @@ public final class JavaFxNesEmulator extends Application {
     private Thread audioThread;
     private volatile boolean audioThreadRunning;
     private Stage primaryStage;
+    private Label footerLabel;
 
-    public static void launchWith(NesBus bus) throws InterruptedException {
+    public static void launchWith(NesBus bus, Path romPath) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
             if (sharedBus != null) {
                 throw new IllegalStateException("Emulator already running");
             }
             sharedBus = Objects.requireNonNull(bus, "bus");
             exitLatch = new CountDownLatch(1);
+            sharedRomPath = romPath;
         }
         Application.launch(JavaFxNesEmulator.class);
         exitLatch.await();
@@ -91,7 +97,10 @@ public final class JavaFxNesEmulator extends Application {
         BorderPane root = new BorderPane();
         root.setCenter(canvasHolder);
         root.setTop(buildMenuBar());
-        stage.setTitle("jNESb");
+        footerLabel = new Label(buildFooterText());
+        footerLabel.setPadding(new Insets(4, 8, 4, 8));
+        root.setBottom(footerLabel);
+        stage.setTitle(buildWindowTitle());
         Scene scene = new Scene(root);
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handleKey(event, true));
         scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> handleKey(event, false));
@@ -132,6 +141,7 @@ public final class JavaFxNesEmulator extends Application {
             if (exitLatch != null) {
                 exitLatch.countDown();
             }
+            sharedRomPath = null;
         }
         stopAudioThread();
         if (audioOutput != null) {
@@ -222,6 +232,20 @@ public final class JavaFxNesEmulator extends Application {
         debugMenu.getItems().addAll(inputRegisterItem, cpuRegisterItem);
 
         return new MenuBar(gameMenu, inputMenu, debugMenu);
+    }
+    
+    private String buildFooterText() {
+        String gameName = sharedRomPath != null && sharedRomPath.getFileName() != null
+                ? sharedRomPath.getFileName().toString()
+                : "No game loaded";
+        return " Game: " + gameName + " ";
+    }
+
+    private String buildWindowTitle() {
+        String gameName = sharedRomPath != null && sharedRomPath.getFileName() != null
+                ? sharedRomPath.getFileName().toString()
+                : "No ROM";
+        return "jNESb - " + gameName;
     }
 
     private void handleLoadGame() {

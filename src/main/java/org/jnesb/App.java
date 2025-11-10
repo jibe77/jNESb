@@ -87,7 +87,7 @@ public final class App {
 
     private static void launchJavaFx(NesBus bus, Path romPath) {
         try {
-            JavaFxNesEmulator.launchWith(bus);
+            JavaFxNesEmulator.launchWith(bus, romPath);
             System.out.printf(Locale.ROOT,
                     "Running %s. Close the window to exit.%n", romPath.getFileName());
         } catch (InterruptedException ex) {
