@@ -96,9 +96,7 @@ public final class JavaFxNesEmulator extends Application {
         this.frameImage = new WritableImage(Ppu2C02.SCREEN_WIDTH, Ppu2C02.SCREEN_HEIGHT);
         this.canvas = new Canvas(Ppu2C02.SCREEN_WIDTH * DISPLAY_SCALE, Ppu2C02.SCREEN_HEIGHT * DISPLAY_SCALE);
         configureDefaultKeyBindings();
-        this.audioOutput = new AudioOutput();
-        this.audioOutput.start();
-        startAudioThread();
+        startAudioPipeline();
 
         StackPane canvasHolder = new StackPane(canvas);
         BorderPane root = new BorderPane();
@@ -140,10 +138,7 @@ public final class JavaFxNesEmulator extends Application {
             }
             sharedRomPath = null;
         }
-        stopAudioThread();
-        if (audioOutput != null) {
-            audioOutput.close();
-        }
+        stopAudioPipeline();
     }
 
     private void runLoop() {
@@ -375,14 +370,14 @@ public final class JavaFxNesEmulator extends Application {
 
         boolean wasRunning = running && !paused;
         stopEmulationThread();
+        stopAudioPipeline();
         bus.insertCartridge(cartridge);
         bus.reset();
         sharedRomPath = romPath;
         updateWindowDecorations();
+        startAudioPipeline();
         if (wasRunning) {
-            if (menuPaused) {
-                paused = true;
-            } else {
+            if (!menuPaused) {
                 startEmulationThread();
             }
         }
@@ -451,6 +446,22 @@ public final class JavaFxNesEmulator extends Application {
         } else if (!desiredPause && paused) {
             paused = false;
             startEmulationThread();
+        }
+    }
+
+    private void startAudioPipeline() {
+        if (audioOutput == null) {
+            audioOutput = new AudioOutput();
+            audioOutput.start();
+        }
+        startAudioThread();
+    }
+
+    private void stopAudioPipeline() {
+        stopAudioThread();
+        if (audioOutput != null) {
+            audioOutput.close();
+            audioOutput = null;
         }
     }
 
