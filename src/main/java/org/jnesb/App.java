@@ -104,8 +104,9 @@ public final class App {
     private static void launchJavaFx(NesBus bus, Path romPath) {
         try {
             JavaFxNesEmulator.launchWith(bus, romPath);
+            String description = romPath != null ? romPath.getFileName().toString() : "no ROM loaded";
             System.out.printf(Locale.ROOT,
-                    "Running %s. Close the window to exit.%n", romPath.getFileName());
+                    "Emulation session ended (%s).%n", description);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             System.err.println("Emulation interrupted; shutting down.");
