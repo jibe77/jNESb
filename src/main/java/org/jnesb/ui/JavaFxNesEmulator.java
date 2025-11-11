@@ -29,8 +29,12 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Rectangle;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
@@ -58,6 +62,7 @@ public final class JavaFxNesEmulator extends Application {
     private Thread emulationThread;
 
     private Canvas canvas;
+    private StackPane canvasHolder;
     private WritableImage frameImage;
     private int[] rgbBuffer;
     private NesController controller1;
@@ -67,6 +72,7 @@ public final class JavaFxNesEmulator extends Application {
     private Thread audioThread;
     private volatile boolean audioThreadRunning;
     private Stage primaryStage;
+    private MenuBar menuBar;
     private Label footerLabel;
     private boolean paused;
     private boolean menuPaused;
@@ -98,10 +104,12 @@ public final class JavaFxNesEmulator extends Application {
         configureDefaultKeyBindings();
         startAudioPipeline();
 
-        StackPane canvasHolder = new StackPane(canvas);
+        canvasHolder = new StackPane(canvas);
+        canvasHolder.setBackground(new Background(new BackgroundFill(Color.BLACK, null, null)));
         BorderPane root = new BorderPane();
         root.setCenter(canvasHolder);
-        root.setTop(buildMenuBar());
+        menuBar = buildMenuBar();
+        root.setTop(menuBar);
         footerLabel = new Label(buildFooterText());
         footerLabel.setPadding(new Insets(4, 8, 4, 8));
         root.setBottom(footerLabel);
@@ -118,12 +126,23 @@ public final class JavaFxNesEmulator extends Application {
                 zapper.aimAt(-1, -1);
             }
         });
-        canvas.setCursor(Cursor.CROSSHAIR);
+        
+        // Fix the cursor to a crosshair for better aiming with the Zapper
+        // canvas.setCursor(Cursor.CROSSHAIR);
         
         stage.setScene(scene);
         stage.setResizable(false);
         stage.setOnCloseRequest(event -> running = false);
         stage.show();
+        stage.fullScreenProperty().addListener((obs, oldVal, newVal) ->
+                Platform.runLater(() -> {
+                    updateCanvasSize();
+                    updateFullScreenUi();
+                }));
+        canvasHolder.widthProperty().addListener((obs, oldVal, newVal) -> updateCanvasSize());
+        canvasHolder.heightProperty().addListener((obs, oldVal, newVal) -> updateCanvasSize());
+        updateCanvasSize();
+        updateFullScreenUi();
 
         startEmulationThread();
     }
@@ -208,6 +227,12 @@ public final class JavaFxNesEmulator extends Application {
         gameMenu.getItems().addAll(loadGame, resetGame);
         registerMenuForAutoPause(gameMenu);
 
+        Menu displayMenu = new Menu("Display");
+        MenuItem fullScreenItem = new MenuItem("Full Screen");
+        fullScreenItem.setOnAction(event -> toggleFullScreen());
+        displayMenu.getItems().add(fullScreenItem);
+        registerMenuForAutoPause(displayMenu);
+
         Menu inputMenu = new Menu("Input");
         Menu configureMenu = new Menu("Configure");
         MenuItem configurePlayer1 = new MenuItem("Input 1st player");
@@ -226,7 +251,7 @@ public final class JavaFxNesEmulator extends Application {
         debugMenu.getItems().addAll(inputRegisterItem, cpuRegisterItem);
         registerMenuForAutoPause(debugMenu);
 
-        return new MenuBar(gameMenu, inputMenu, debugMenu);
+        return new MenuBar(gameMenu, displayMenu, inputMenu, debugMenu);
     }
     
     private String buildFooterText() {
@@ -312,6 +337,17 @@ public final class JavaFxNesEmulator extends Application {
         alert.showAndWait();
     }
 
+    private void toggleFullScreen() {
+        if (primaryStage == null) {
+            return;
+        }
+        primaryStage.setFullScreen(!primaryStage.isFullScreen());
+        Platform.runLater(() -> {
+            updateCanvasSize();
+            updateFullScreenUi();
+        });
+    }
+
     private void showErrorAlert(String title, String header, String content) {
         Alert alert = new Alert(AlertType.ERROR);
         alert.setTitle(title);
@@ -390,6 +426,8 @@ public final class JavaFxNesEmulator extends Application {
         if (primaryStage != null) {
             primaryStage.setTitle(buildWindowTitle());
         }
+        updateCanvasSize();
+        updateFullScreenUi();
     }
 
     private void startEmulationThread() {
@@ -536,5 +574,43 @@ public final class JavaFxNesEmulator extends Application {
         int targetX = (int) Math.floor(eventX / scaleX);
         int targetY = (int) Math.floor(eventY / scaleY);
         zapper.aimAt(targetX, targetY);
+    }
+
+    private void updateCanvasSize() {
+        if (canvasHolder == null || canvas == null) {
+            return;
+        }
+        double baseWidth = Ppu2C02.SCREEN_WIDTH * DISPLAY_SCALE;
+        double baseHeight = Ppu2C02.SCREEN_HEIGHT * DISPLAY_SCALE;
+        boolean fullScreen = primaryStage != null && primaryStage.isFullScreen();
+        if (fullScreen) {
+            double availableWidth = Math.max(1.0, canvasHolder.getWidth());
+            double availableHeight = Math.max(1.0, canvasHolder.getHeight());
+            double scale = Math.min(
+                    availableWidth / Ppu2C02.SCREEN_WIDTH,
+                    availableHeight / Ppu2C02.SCREEN_HEIGHT);
+            if (Double.isFinite(scale) && scale > 0.0) {
+                canvas.setWidth(Ppu2C02.SCREEN_WIDTH * scale);
+                canvas.setHeight(Ppu2C02.SCREEN_HEIGHT * scale);
+                return;
+            }
+        }
+        canvas.setWidth(baseWidth);
+        canvas.setHeight(baseHeight);
+    }
+
+    private void updateFullScreenUi() {
+        if (primaryStage == null) {
+            return;
+        }
+        boolean fullScreen = primaryStage.isFullScreen();
+        if (menuBar != null) {
+            menuBar.setVisible(!fullScreen);
+            menuBar.setManaged(!fullScreen);
+        }
+        if (footerLabel != null) {
+            footerLabel.setVisible(!fullScreen);
+            footerLabel.setManaged(!fullScreen);
+        }
     }
 }
