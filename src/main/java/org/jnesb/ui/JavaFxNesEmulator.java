@@ -1,5 +1,7 @@
 package org.jnesb.ui;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -10,13 +12,13 @@ import java.util.concurrent.locks.LockSupport;
 
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.geometry.Insets;
 import javafx.scene.Cursor;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
-import javafx.geometry.Insets;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
@@ -29,10 +31,12 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import org.jnesb.audio.AudioOutput;
 import org.jnesb.bus.NesBus;
+import org.jnesb.cartridge.Cartridge;
 import org.jnesb.cpu.Cpu6502;
 import org.jnesb.input.NesController;
 import org.jnesb.input.NesController.Button;
@@ -64,6 +68,8 @@ public final class JavaFxNesEmulator extends Application {
     private volatile boolean audioThreadRunning;
     private Stage primaryStage;
     private Label footerLabel;
+    private MenuItem pauseMenuItem;
+    private boolean paused;
 
     public static void launchWith(NesBus bus, Path romPath) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -120,22 +126,12 @@ public final class JavaFxNesEmulator extends Application {
         stage.setOnCloseRequest(event -> running = false);
         stage.show();
 
-        running = true;
-        emulationThread = new Thread(this::runLoop, "jNESb-Emulation");
-        emulationThread.setDaemon(true);
-        emulationThread.start();
+        startEmulationThread();
     }
 
     @Override
     public void stop() {
-        running = false;
-        if (emulationThread != null && emulationThread.isAlive() && emulationThread != Thread.currentThread()) {
-            try {
-                emulationThread.join(1000);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
-        }
+        stopEmulationThread();
         synchronized (JavaFxNesEmulator.class) {
             sharedBus = null;
             if (exitLatch != null) {
@@ -213,7 +209,10 @@ public final class JavaFxNesEmulator extends Application {
         loadGame.setOnAction(event -> handleLoadGame());
         MenuItem resetGame = new MenuItem("Reset");
         resetGame.setOnAction(event -> handleResetGame());
-        gameMenu.getItems().addAll(loadGame, resetGame);
+        pauseMenuItem = new MenuItem("Pause");
+        pauseMenuItem.setOnAction(event -> togglePause());
+        gameMenu.getItems().addAll(loadGame, resetGame, pauseMenuItem);
+        updatePauseMenuLabel();
 
         Menu inputMenu = new Menu("Input");
         Menu configureMenu = new Menu("Configure");
@@ -249,16 +248,28 @@ public final class JavaFxNesEmulator extends Application {
     }
 
     private void handleLoadGame() {
-        showInfoAlert("Load Game",
-                "Load Game",
-                "Loading a new ROM from the UI is not supported yet.\n"
-                        + "Please restart jNESb with the desired ROM path.");
+        FileChooser chooser = createRomFileChooser();
+        boolean pausedForDialog = !paused && running;
+        if (pausedForDialog) {
+            setPaused(true);
+        }
+        File selected = chooser.showOpenDialog(primaryStage);
+        if (pausedForDialog) {
+            setPaused(false);
+        }
+        if (selected != null) {
+            loadGame(selected.toPath());
+        }
     }
 
     private void handleResetGame() {
         if (bus != null) {
             bus.reset();
         }
+    }
+
+    private void togglePause() {
+        setPaused(!paused);
     }
 
     private void showInputConfigurationDialog(int playerIndex) {
@@ -310,10 +321,129 @@ public final class JavaFxNesEmulator extends Application {
         alert.showAndWait();
     }
 
+    private void showErrorAlert(String title, String header, String content) {
+        Alert alert = new Alert(AlertType.ERROR);
+        alert.setTitle(title);
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        if (primaryStage != null) {
+            alert.initOwner(primaryStage);
+        }
+        alert.showAndWait();
+    }
+
     private static String formatHex(int value, int width) {
         int bits = Math.min(width * 4, 16);
         int mask = (1 << bits) - 1;
         return String.format("%0" + width + "X", value & mask);
+    }
+
+
+    private FileChooser createRomFileChooser() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Select NES ROM");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("NES ROM (*.nes)", "*.nes"));
+        if (sharedRomPath != null && sharedRomPath.getParent() != null) {
+            File parent = sharedRomPath.getParent().toFile();
+            if (parent.exists()) {
+                chooser.setInitialDirectory(parent);
+            }
+        }
+        return chooser;
+    }
+
+    private void loadGame(Path romPath) {
+        if (romPath == null) {
+            return;
+        }
+        if (bus == null) {
+            showErrorAlert("Load Game", "NES bus unavailable", "Cannot load a ROM right now.");
+            return;
+        }
+
+        final Cartridge cartridge;
+        try {
+            cartridge = Cartridge.load(romPath);
+        } catch (IOException ex) {
+            showErrorAlert("Load Game Failed", "Could not load ROM",
+                    "Failed to load " + romPath + ":\n" + ex.getMessage());
+            return;
+        }
+
+        if (!cartridge.isImageValid()) {
+            showErrorAlert("Load Game Failed", "Invalid ROM",
+                    "The file \"" + romPath.getFileName() + "\" is not a valid NES ROM.");
+            return;
+        }
+
+        boolean resumeAfterLoad = !paused;
+        stopEmulationThread();
+        bus.insertCartridge(cartridge);
+        bus.reset();
+        sharedRomPath = romPath;
+        updateWindowDecorations();
+        if (resumeAfterLoad) {
+            startEmulationThread();
+        }
+    }
+
+    private void updateWindowDecorations() {
+        if (footerLabel != null) {
+            footerLabel.setText(buildFooterText());
+        }
+        if (primaryStage != null) {
+            primaryStage.setTitle(buildWindowTitle());
+        }
+        updatePauseMenuLabel();
+    }
+
+    private void startEmulationThread() {
+        if (running || bus == null) {
+            return;
+        }
+        running = true;
+        emulationThread = new Thread(this::runLoop, "jNESb-Emulation");
+        emulationThread.setDaemon(true);
+        emulationThread.start();
+    }
+
+    private void stopEmulationThread() {
+        running = false;
+        if (emulationThread != null && emulationThread.isAlive() && emulationThread != Thread.currentThread()) {
+            try {
+                emulationThread.join(1000);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        emulationThread = null;
+    }
+
+    private void updatePauseMenuLabel() {
+        if (pauseMenuItem == null) {
+            return;
+        }
+        if (bus == null) {
+            pauseMenuItem.setDisable(true);
+            pauseMenuItem.setText("Pause");
+            return;
+        }
+        pauseMenuItem.setDisable(false);
+        pauseMenuItem.setText(paused || !running ? "Resume" : "Pause");
+    }
+
+    private void setPaused(boolean targetPaused) {
+        if (paused == targetPaused) {
+            return;
+        }
+        paused = targetPaused;
+        if (paused) {
+            stopEmulationThread();
+        } else {
+            startEmulationThread();
+        }
+        updatePauseMenuLabel();
     }
 
     private void startAudioThread() {
