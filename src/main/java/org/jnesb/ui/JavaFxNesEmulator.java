@@ -68,8 +68,9 @@ public final class JavaFxNesEmulator extends Application {
     private volatile boolean audioThreadRunning;
     private Stage primaryStage;
     private Label footerLabel;
-    private MenuItem pauseMenuItem;
     private boolean paused;
+    private boolean menuPaused;
+    private int menuPauseDepth;
 
     public static void launchWith(NesBus bus, Path romPath) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -209,10 +210,8 @@ public final class JavaFxNesEmulator extends Application {
         loadGame.setOnAction(event -> handleLoadGame());
         MenuItem resetGame = new MenuItem("Reset");
         resetGame.setOnAction(event -> handleResetGame());
-        pauseMenuItem = new MenuItem("Pause");
-        pauseMenuItem.setOnAction(event -> togglePause());
-        gameMenu.getItems().addAll(loadGame, resetGame, pauseMenuItem);
-        updatePauseMenuLabel();
+        gameMenu.getItems().addAll(loadGame, resetGame);
+        registerMenuForAutoPause(gameMenu);
 
         Menu inputMenu = new Menu("Input");
         Menu configureMenu = new Menu("Configure");
@@ -222,6 +221,7 @@ public final class JavaFxNesEmulator extends Application {
         configurePlayer2.setOnAction(event -> showInputConfigurationDialog(1));
         configureMenu.getItems().addAll(configurePlayer1, configurePlayer2);
         inputMenu.getItems().add(configureMenu);
+        registerMenuForAutoPause(inputMenu);
 
         Menu debugMenu = new Menu("Debug");
         MenuItem inputRegisterItem = new MenuItem("Input Register");
@@ -229,6 +229,7 @@ public final class JavaFxNesEmulator extends Application {
         MenuItem cpuRegisterItem = new MenuItem("CPU register");
         cpuRegisterItem.setOnAction(event -> showCpuRegisterDialog());
         debugMenu.getItems().addAll(inputRegisterItem, cpuRegisterItem);
+        registerMenuForAutoPause(debugMenu);
 
         return new MenuBar(gameMenu, inputMenu, debugMenu);
     }
@@ -249,13 +250,12 @@ public final class JavaFxNesEmulator extends Application {
 
     private void handleLoadGame() {
         FileChooser chooser = createRomFileChooser();
-        boolean pausedForDialog = !paused && running;
-        if (pausedForDialog) {
-            setPaused(true);
-        }
-        File selected = chooser.showOpenDialog(primaryStage);
-        if (pausedForDialog) {
-            setPaused(false);
+        setMenuPausedTemporarily(true);
+        File selected;
+        try {
+            selected = chooser.showOpenDialog(primaryStage);
+        } finally {
+            setMenuPausedTemporarily(false);
         }
         if (selected != null) {
             loadGame(selected.toPath());
@@ -266,10 +266,6 @@ public final class JavaFxNesEmulator extends Application {
         if (bus != null) {
             bus.reset();
         }
-    }
-
-    private void togglePause() {
-        setPaused(!paused);
     }
 
     private void showInputConfigurationDialog(int playerIndex) {
@@ -377,14 +373,18 @@ public final class JavaFxNesEmulator extends Application {
             return;
         }
 
-        boolean resumeAfterLoad = !paused;
+        boolean wasRunning = running && !paused;
         stopEmulationThread();
         bus.insertCartridge(cartridge);
         bus.reset();
         sharedRomPath = romPath;
         updateWindowDecorations();
-        if (resumeAfterLoad) {
-            startEmulationThread();
+        if (wasRunning) {
+            if (menuPaused) {
+                paused = true;
+            } else {
+                startEmulationThread();
+            }
         }
     }
 
@@ -395,7 +395,6 @@ public final class JavaFxNesEmulator extends Application {
         if (primaryStage != null) {
             primaryStage.setTitle(buildWindowTitle());
         }
-        updatePauseMenuLabel();
     }
 
     private void startEmulationThread() {
@@ -403,6 +402,7 @@ public final class JavaFxNesEmulator extends Application {
             return;
         }
         running = true;
+        paused = false;
         emulationThread = new Thread(this::runLoop, "jNESb-Emulation");
         emulationThread.setDaemon(true);
         emulationThread.start();
@@ -410,6 +410,7 @@ public final class JavaFxNesEmulator extends Application {
 
     private void stopEmulationThread() {
         running = false;
+        paused = true;
         if (emulationThread != null && emulationThread.isAlive() && emulationThread != Thread.currentThread()) {
             try {
                 emulationThread.join(1000);
@@ -420,30 +421,37 @@ public final class JavaFxNesEmulator extends Application {
         emulationThread = null;
     }
 
-    private void updatePauseMenuLabel() {
-        if (pauseMenuItem == null) {
-            return;
-        }
-        if (bus == null) {
-            pauseMenuItem.setDisable(true);
-            pauseMenuItem.setText("Pause");
-            return;
-        }
-        pauseMenuItem.setDisable(false);
-        pauseMenuItem.setText(paused || !running ? "Resume" : "Pause");
+    private void registerMenuForAutoPause(Menu menu) {
+        menu.setOnShowing(event -> setMenuPausedTemporarily(true));
+        menu.setOnHidden(event -> setMenuPausedTemporarily(false));
     }
 
-    private void setPaused(boolean targetPaused) {
-        if (paused == targetPaused) {
-            return;
+    private void updateMenuPauseFlag() {
+        boolean newMenuPaused = menuPauseDepth > 0;
+        if (menuPaused != newMenuPaused) {
+            menuPaused = newMenuPaused;
+            applyPauseState();
         }
-        paused = targetPaused;
-        if (paused) {
-            stopEmulationThread();
+    }
+
+    private void setMenuPausedTemporarily(boolean engage) {
+        if (engage) {
+            menuPauseDepth++;
         } else {
+            menuPauseDepth = Math.max(0, menuPauseDepth - 1);
+        }
+        updateMenuPauseFlag();
+    }
+
+    private void applyPauseState() {
+        boolean desiredPause = menuPaused;
+        if (desiredPause && !paused) {
+            paused = true;
+            stopEmulationThread();
+        } else if (!desiredPause && paused) {
+            paused = false;
             startEmulationThread();
         }
-        updatePauseMenuLabel();
     }
 
     private void startAudioThread() {

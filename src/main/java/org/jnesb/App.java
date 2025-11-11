@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Locale;
+import java.util.Objects;
 
 import org.jnesb.bus.NesBus;
 import org.jnesb.cartridge.Cartridge;
@@ -27,36 +28,51 @@ public final class App {
         }
 
         Path romPath = options.romPath;
-        if (!Files.exists(romPath)) {
-            System.err.printf(Locale.ROOT, "ROM not found: %s%n", romPath);
+        boolean hasRom = romPath != null;
+
+        if (options.headless && !hasRom) {
+            System.err.println("Headless mode requires a ROM path.");
             return;
         }
 
-        try {
-            Cartridge cartridge = Cartridge.load(romPath);
-            if (!cartridge.isImageValid()) {
-                System.err.printf(Locale.ROOT, "ROM image is invalid: %s%n", romPath);
+        NesBus bus = new NesBus();
+        Cartridge cartridge = null;
+
+        if (hasRom) {
+            if (!Files.exists(romPath)) {
+                System.err.printf(Locale.ROOT, "ROM not found: %s%n", romPath);
                 return;
             }
-
-            NesBus bus = new NesBus();
-            bus.insertCartridge(cartridge);
-            bus.reset();
-
-            if (options.headless || options.romPath == null) {
-                long ticks = runForFrames(bus, options.framesToRun);
-                System.out.printf(Locale.ROOT,
-                        "Completed %d frame(s) for %s in %,d PPU cycles.%n",
-                        options.framesToRun, romPath.getFileName(), ticks);
-            } else {
-                if (options.framesToRun != DEFAULT_FRAME_COUNT) {
-                    System.out.println("--frames option is ignored in graphical mode.");
+            try {
+                cartridge = Cartridge.load(romPath);
+                if (!cartridge.isImageValid()) {
+                    System.err.printf(Locale.ROOT, "ROM image is invalid: %s%n", romPath);
+                    return;
                 }
-                launchJavaFx(bus, romPath);
+                bus.insertCartridge(cartridge);
+            } catch (IOException ex) {
+                System.err.printf(Locale.ROOT, "Failed to load ROM %s: %s%n", romPath, ex.getMessage());
+                return;
             }
-        } catch (IOException ex) {
-            System.err.printf(Locale.ROOT, "Failed to load ROM %s: %s%n", romPath, ex.getMessage());
         }
+
+        if (options.headless) {
+            bus.reset();
+            long ticks = runForFrames(bus, options.framesToRun);
+            System.out.printf(Locale.ROOT,
+                    "Completed %d frame(s) for %s in %,d PPU cycles.%n",
+                    options.framesToRun, Objects.requireNonNull(romPath).getFileName(), ticks);
+            return;
+        }
+
+        bus.reset();
+        if (options.framesToRun != DEFAULT_FRAME_COUNT) {
+            System.out.println("--frames option is ignored in graphical mode.");
+        }
+        if (!hasRom) {
+            System.out.println("No ROM provided. Use Game > Load Game to open one.");
+        }
+        launchJavaFx(bus, romPath);
     }
 
     private static long runForFrames(NesBus bus, int frames) {
@@ -98,8 +114,8 @@ public final class App {
 
     private static void printUsage() {
         System.out.println("jNESb - NES emulator");
-        System.out.println("Usage: java -jar jNESb.jar <path-to-rom> [--headless] [--frames=N]");
-        System.out.println("No ROM provided; nothing to do.");
+        System.out.println("Usage: java -jar jNESb.jar [path-to-rom] [--headless] [--frames=N]");
+        System.out.println("Headless mode requires a ROM path.");
     }
 
     private record CliOptions(Path romPath, int framesToRun, boolean headless) {
@@ -130,11 +146,6 @@ public final class App {
                             "Unexpected argument after ROM path: %s%n", arg);
                     return null;
                 }
-            }
-
-            if (rom == null) {
-                System.err.println("Missing ROM path.");
-                return null;
             }
 
             return new CliOptions(rom, frames, headless);
