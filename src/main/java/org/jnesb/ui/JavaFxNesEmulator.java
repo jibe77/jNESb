@@ -115,7 +115,13 @@ public final class JavaFxNesEmulator extends Application {
         root.setBottom(footerLabel);
         stage.setTitle(buildWindowTitle());
         Scene scene = new Scene(root);
-        scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> handleKey(event, true));
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (handleGlobalShortcut(event)) {
+                event.consume();
+                return;
+            }
+            handleKey(event, true);
+        });
         scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> handleKey(event, false));
         canvas.setOnMouseMoved(this::handleMouseMove);
         canvas.setOnMouseDragged(this::handleMouseMove);
@@ -612,5 +618,19 @@ public final class JavaFxNesEmulator extends Application {
             footerLabel.setVisible(!fullScreen);
             footerLabel.setManaged(!fullScreen);
         }
+    }
+
+    private boolean handleGlobalShortcut(KeyEvent event) {
+        if (event.isControlDown()) {
+            if (event.getCode() == KeyCode.Q) {
+                Platform.exit();
+                return true;
+            }
+            if (event.getCode() == KeyCode.F) {
+                toggleFullScreen();
+                return true;
+            }
+        }
+        return false;
     }
 }
