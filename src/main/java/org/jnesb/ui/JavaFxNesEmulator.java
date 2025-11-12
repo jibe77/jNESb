@@ -23,6 +23,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.KeyCode;
@@ -74,6 +76,7 @@ public final class JavaFxNesEmulator extends Application {
     private Stage primaryStage;
     private MenuBar menuBar;
     private Label footerLabel;
+    private Image controllerIcon;
     private boolean paused;
     private boolean menuPaused;
     private int menuPauseDepth;
@@ -337,6 +340,10 @@ public final class JavaFxNesEmulator extends Application {
         alert.setTitle(title);
         alert.setHeaderText(header);
         alert.setContentText(content);
+        ImageView icon = controllerIconView();
+        if (icon != null) {
+            alert.setGraphic(icon);
+        }
         if (primaryStage != null) {
             alert.initOwner(primaryStage);
         }
@@ -371,6 +378,28 @@ public final class JavaFxNesEmulator extends Application {
         int bits = Math.min(width * 4, 16);
         int mask = (1 << bits) - 1;
         return String.format("%0" + width + "X", value & mask);
+    }
+
+    private static String formatKeyLabel(KeyCode code) {
+        return code == null ? "Unassigned" : code.getName();
+    }
+
+    private ImageView controllerIconView() {
+        if (controllerIcon == null) {
+            try {
+                controllerIcon = new Image(
+                        Objects.requireNonNull(getClass().getResourceAsStream("/controller.png")),
+                        140, 0, true, true);
+            } catch (Exception ex) {
+                controllerIcon = null;
+            }
+        }
+        if (controllerIcon == null) {
+            return null;
+        }
+        ImageView view = new ImageView(controllerIcon);
+        view.setPreserveRatio(true);
+        return view;
     }
 
 
