@@ -340,7 +340,9 @@ public final class JavaFxNesEmulator extends Application {
         if (primaryStage != null) {
             alert.initOwner(primaryStage);
         }
+        setMenuPausedTemporarily(true);
         alert.showAndWait();
+        setMenuPausedTemporarily(false);
     }
 
     private void toggleFullScreen() {
