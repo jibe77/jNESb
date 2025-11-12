@@ -197,6 +197,21 @@ public final class Cartridge {
         return chrBanks;
     }
 
+    public byte[] copyPrgRam() {
+        return Arrays.copyOf(prgRam, prgRam.length);
+    }
+
+    public void loadPrgRam(byte[] data) {
+        if (data == null) {
+            return;
+        }
+        System.arraycopy(data, 0, prgRam, 0, Math.min(prgRam.length, data.length));
+    }
+
+    public int prgRamLength() {
+        return prgRam.length;
+    }
+
     private void applyMirror(Mirror newMirror) {
         if (newMirror == null || newMirror == mirror) {
             return;

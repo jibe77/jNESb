@@ -2,6 +2,7 @@ package org.jnesb.ui;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -233,7 +234,11 @@ public final class JavaFxNesEmulator extends Application {
         loadGame.setOnAction(event -> handleLoadGame());
         MenuItem resetGame = new MenuItem("Reset");
         resetGame.setOnAction(event -> handleResetGame());
-        gameMenu.getItems().addAll(loadGame, resetGame);
+        MenuItem saveState = new MenuItem("Save state");
+        saveState.setOnAction(event -> handleSaveState());
+        MenuItem loadState = new MenuItem("Load state");
+        loadState.setOnAction(event -> handleLoadState());
+        gameMenu.getItems().addAll(loadGame, resetGame, saveState, loadState);
         registerMenuForAutoPause(gameMenu);
 
         Menu displayMenu = new Menu("Display");
@@ -294,6 +299,43 @@ public final class JavaFxNesEmulator extends Application {
     private void handleResetGame() {
         if (bus != null) {
             bus.reset();
+        }
+    }
+
+    private void handleSaveState() {
+        if (bus == null) {
+            showErrorAlert("Save state", null, "No running emulator.");
+            return;
+        }
+        FileChooser chooser = createStateFileChooser(true);
+
+        try {
+            File target = chooser.showSaveDialog(primaryStage);
+            if (target == null) {
+                return;
+            }
+            byte[] data = bus.saveMemoryState();
+            Files.write(target.toPath(), data);
+        } catch (IOException ex) {
+            showErrorAlert("Save state failed", null, ex.getMessage());
+        }
+    }
+
+    private void handleLoadState() {
+        if (bus == null) {
+            showErrorAlert("Load state", null, "No running emulator.");
+            return;
+        }
+        FileChooser chooser = createStateFileChooser(false);
+        try {
+            File source = chooser.showOpenDialog(primaryStage);
+            if (source == null) {
+                return;
+            }
+            byte[] data = Files.readAllBytes(source.toPath());
+            bus.loadMemoryState(data);
+        } catch (IOException ex) {
+            showErrorAlert("Load state failed", null, ex.getMessage());
         }
     }
 
@@ -414,6 +456,14 @@ public final class JavaFxNesEmulator extends Application {
                 chooser.setInitialDirectory(parent);
             }
         }
+        return chooser;
+    }
+
+    private FileChooser createStateFileChooser(boolean save) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(save ? "Save state" : "Load state");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Save States (*.sav)", "*.sav"));
         return chooser;
     }
 

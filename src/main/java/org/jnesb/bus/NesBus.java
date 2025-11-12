@@ -1,5 +1,7 @@
 package org.jnesb.bus;
 
+import java.util.Arrays;
+
 import org.jnesb.AudioConfig;
 import org.jnesb.apu.Apu;
 import org.jnesb.cartridge.Cartridge;
@@ -61,6 +63,33 @@ public final class NesBus implements CpuBus {
     }
     public NesController controller(int index) {
         return controllers[index & 1];
+    }
+
+    public byte[] saveMemoryState() {
+        byte[] cpuRamBytes = new byte[cpuRam.length];
+        for (int i = 0; i < cpuRam.length; i++) {
+            cpuRamBytes[i] = (byte) (cpuRam[i] & 0xFF);
+        }
+        byte[] prgRamBytes = cartridge != null ? cartridge.copyPrgRam() : new byte[0];
+        byte[] snapshot = Arrays.copyOf(cpuRamBytes, cpuRamBytes.length + prgRamBytes.length);
+        System.arraycopy(prgRamBytes, 0, snapshot, cpuRamBytes.length, prgRamBytes.length);
+        return snapshot;
+    }
+
+    public void loadMemoryState(byte[] data) {
+        if (data == null) {
+            return;
+        }
+        int offset = 0;
+        for (int i = 0; i < cpuRam.length && offset < data.length; i++, offset++) {
+            cpuRam[i] = data[offset] & 0xFF;
+        }
+        if (cartridge != null && cartridge.prgRamLength() > 0) {
+            int remaining = data.length - offset;
+            byte[] prgSlice = new byte[Math.min(remaining, cartridge.prgRamLength())];
+            System.arraycopy(data, offset, prgSlice, 0, prgSlice.length);
+            cartridge.loadPrgRam(prgSlice);
+        }
     }
 
     public void reset() {
