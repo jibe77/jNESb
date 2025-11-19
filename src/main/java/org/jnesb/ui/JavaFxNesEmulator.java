@@ -348,7 +348,15 @@ public final class JavaFxNesEmulator extends Application {
             // Stop emulation thread to prevent race condition during state load
             boolean wasRunning = running && !paused;
             stopEmulationThread();
-            bus.loadMemoryState(data);
+            try {
+                bus.loadMemoryState(data);
+            } catch (IllegalStateException ex) {
+                showErrorAlert("Load state failed", "Wrong game", ex.getMessage());
+                if (wasRunning && !menuPaused) {
+                    startEmulationThread();
+                }
+                return;
+            }
             if (wasRunning && !menuPaused) {
                 startEmulationThread();
             }
@@ -797,7 +805,15 @@ public final class JavaFxNesEmulator extends Application {
             // Stop emulation thread to prevent race condition during state load
             boolean wasRunning = running && !paused;
             stopEmulationThread();
-            bus.loadMemoryState(data);
+            try {
+                bus.loadMemoryState(data);
+            } catch (IllegalStateException ex) {
+                showSlotNotification("Wrong game: " + ex.getMessage());
+                if (wasRunning && !menuPaused) {
+                    startEmulationThread();
+                }
+                return;
+            }
             if (wasRunning && !menuPaused) {
                 startEmulationThread();
             }

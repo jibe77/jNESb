@@ -21,8 +21,8 @@ public final class NesBus implements CpuBus {
 
     // Save state format constants
     private static final byte[] MAGIC = {'j', 'N', 'E', 'S'};
-    private static final short VERSION = 2;
-    private static final int HEADER_SIZE = 4 + 2 + 4; // magic + version + checksum
+    private static final short VERSION = 3;
+    private static final int HEADER_SIZE = 4 + 2 + 4 + 4; // magic + version + checksum + romChecksum
 
     private static final int AUDIO_BUFFER_CAPACITY = 4096;
 
@@ -105,6 +105,9 @@ public final class NesBus implements CpuBus {
         buffer.putShort(VERSION);
         int checksumPosition = buffer.position();
         buffer.putInt(0); // Placeholder for checksum
+        // Write ROM checksum for game validation
+        int romChecksum = cartridge != null ? cartridge.romChecksum() : 0;
+        buffer.putInt(romChecksum);
 
         // Write payload
         buffer.putInt(cpuState.length);
@@ -136,6 +139,7 @@ public final class NesBus implements CpuBus {
 
     /**
      * Loads the emulator state from a byte array with structured format validation.
+     * @throws IllegalStateException if the save state is for a different game
      */
     public void loadMemoryState(byte[] data) {
         if (data == null || data.length < HEADER_SIZE) {
@@ -157,12 +161,30 @@ public final class NesBus implements CpuBus {
         short version = buffer.getShort();
         int storedChecksum = buffer.getInt();
 
+        // Read ROM checksum (version 3+)
+        int storedRomChecksum = 0;
+        if (version >= 3) {
+            storedRomChecksum = buffer.getInt();
+        }
+
+        // Calculate actual header size based on version
+        int actualHeaderSize = (version >= 3) ? HEADER_SIZE : (HEADER_SIZE - 4);
+
         // Verify checksum
         CRC32 crc = new CRC32();
-        crc.update(data, HEADER_SIZE, data.length - HEADER_SIZE);
+        crc.update(data, actualHeaderSize, data.length - actualHeaderSize);
         int calculatedChecksum = (int) crc.getValue();
         if (storedChecksum != calculatedChecksum) {
             return; // Corrupted file
+        }
+
+        // Validate ROM checksum (version 3+)
+        if (version >= 3 && cartridge != null && storedRomChecksum != 0) {
+            int currentRomChecksum = cartridge.romChecksum();
+            if (storedRomChecksum != currentRomChecksum) {
+                throw new IllegalStateException(
+                    "Save state was created for a different game (ROM checksum mismatch)");
+            }
         }
 
         // Read component states from buffer (must match save order)
