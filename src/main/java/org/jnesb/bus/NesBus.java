@@ -139,11 +139,11 @@ public final class NesBus implements CpuBus {
 
     /**
      * Loads the emulator state from a byte array with structured format validation.
-     * @throws IllegalStateException if the save state is for a different game
+     * @throws IllegalStateException if the save state is for a different game or invalid format
      */
     public void loadMemoryState(byte[] data) {
         if (data == null || data.length < HEADER_SIZE) {
-            return;
+            throw new IllegalStateException("Invalid save state: file too small");
         }
 
         ByteBuffer buffer = ByteBuffer.wrap(data);
@@ -152,34 +152,28 @@ public final class NesBus implements CpuBus {
         byte[] magic = new byte[4];
         buffer.get(magic);
         if (!Arrays.equals(magic, MAGIC)) {
-            // Try legacy format (old save files)
-            loadLegacyState(data);
-            return;
+            throw new IllegalStateException("Invalid save state: unrecognized format");
         }
 
         // Read version and checksum
         short version = buffer.getShort();
-        int storedChecksum = buffer.getInt();
-
-        // Read ROM checksum (version 3+)
-        int storedRomChecksum = 0;
-        if (version >= 3) {
-            storedRomChecksum = buffer.getInt();
+        if (version < 3) {
+            throw new IllegalStateException("Invalid save state: unsupported version " + version + " (requires version 3+)");
         }
 
-        // Calculate actual header size based on version
-        int actualHeaderSize = (version >= 3) ? HEADER_SIZE : (HEADER_SIZE - 4);
+        int storedChecksum = buffer.getInt();
+        int storedRomChecksum = buffer.getInt();
 
         // Verify checksum
         CRC32 crc = new CRC32();
-        crc.update(data, actualHeaderSize, data.length - actualHeaderSize);
+        crc.update(data, HEADER_SIZE, data.length - HEADER_SIZE);
         int calculatedChecksum = (int) crc.getValue();
         if (storedChecksum != calculatedChecksum) {
-            return; // Corrupted file
+            throw new IllegalStateException("Invalid save state: corrupted file (checksum mismatch)");
         }
 
-        // Validate ROM checksum (version 3+)
-        if (version >= 3 && cartridge != null && storedRomChecksum != 0) {
+        // Validate ROM checksum
+        if (cartridge != null && storedRomChecksum != 0) {
             int currentRomChecksum = cartridge.romChecksum();
             if (storedRomChecksum != currentRomChecksum) {
                 throw new IllegalStateException(
@@ -212,30 +206,16 @@ public final class NesBus implements CpuBus {
         }
 
         int cartridgeStateSize = buffer.getInt();
-        if (cartridge != null && cartridgeStateSize > 0) {
+        if (cartridgeStateSize > 0) {
             byte[] cartridgeState = new byte[cartridgeStateSize];
             buffer.get(cartridgeState);
-            cartridge.loadState(cartridgeState);
+            if (cartridge != null) {
+                cartridge.loadState(cartridgeState);
+            }
         }
 
         if (buffer.remaining() >= 8) {
             systemClockCounter = buffer.getLong();
-        }
-    }
-
-    /**
-     * Legacy state loading for backward compatibility with old save files.
-     */
-    private void loadLegacyState(byte[] data) {
-        int offset = 0;
-        for (int i = 0; i < cpuRam.length && offset < data.length; i++, offset++) {
-            cpuRam[i] = data[offset] & 0xFF;
-        }
-        if (cartridge != null && cartridge.prgRamLength() > 0) {
-            int remaining = data.length - offset;
-            byte[] prgSlice = new byte[Math.min(remaining, cartridge.prgRamLength())];
-            System.arraycopy(data, offset, prgSlice, 0, prgSlice.length);
-            cartridge.loadPrgRam(prgSlice);
         }
     }
 
