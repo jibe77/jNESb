@@ -334,7 +334,13 @@ public final class JavaFxNesEmulator extends Application {
                 return;
             }
             byte[] data = Files.readAllBytes(source.toPath());
+            // Stop emulation thread to prevent race condition during state load
+            boolean wasRunning = running && !paused;
+            stopEmulationThread();
             bus.loadMemoryState(data);
+            if (wasRunning && !menuPaused) {
+                startEmulationThread();
+            }
         } catch (IOException ex) {
             showErrorAlert("Load state failed", null, ex.getMessage());
         }
@@ -777,7 +783,13 @@ public final class JavaFxNesEmulator extends Application {
                 return;
             }
             byte[] data = Files.readAllBytes(savePath);
+            // Stop emulation thread to prevent race condition during state load
+            boolean wasRunning = running && !paused;
+            stopEmulationThread();
             bus.loadMemoryState(data);
+            if (wasRunning && !menuPaused) {
+                startEmulationThread();
+            }
             showSlotNotification("Loaded from slot " + currentSlot);
         } catch (IOException ex) {
             showSlotNotification("Load failed: " + ex.getMessage());

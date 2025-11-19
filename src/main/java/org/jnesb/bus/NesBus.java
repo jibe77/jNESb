@@ -165,20 +165,23 @@ public final class NesBus implements CpuBus {
             return; // Corrupted file
         }
 
-        // Load component states
+        // Read component states from buffer (must match save order)
         int cpuStateSize = buffer.getInt();
         byte[] cpuState = new byte[cpuStateSize];
         buffer.get(cpuState);
-        cpu.loadState(cpuState);
 
         int ppuStateSize = buffer.getInt();
         byte[] ppuState = new byte[ppuStateSize];
         buffer.get(ppuState);
-        ppu.loadState(ppuState);
 
         int apuStateSize = buffer.getInt();
         byte[] apuState = new byte[apuStateSize];
         buffer.get(apuState);
+
+        // Apply states in correct order: PPU first, then CPU
+        // This prevents NMI timing issues during state restoration
+        ppu.loadState(ppuState);
+        cpu.loadState(cpuState);
         apu.loadState(apuState);
 
         int cpuRamSize = buffer.getInt();
