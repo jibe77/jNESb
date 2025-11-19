@@ -79,6 +79,30 @@ public abstract class Mapper {
         // Default no-op
     }
 
+    /**
+     * Saves the mapper state to a byte array. Default implementation returns an empty array.
+     * @return byte array containing the serialized state
+     */
+    public byte[] saveState() {
+        return new byte[0];
+    }
+
+    /**
+     * Restores the mapper state from a byte array. Default implementation does nothing.
+     * @param data byte array containing the serialized state
+     */
+    public void loadState(byte[] data) {
+        // Default no-op
+    }
+
+    /**
+     * Returns the expected size of the mapper state data.
+     * @return size in bytes
+     */
+    public int stateSize() {
+        return 0;
+    }
+
     public void setMirrorListener(MirrorListener listener) {
         this.mirrorListener = Objects.requireNonNull(listener, "listener");
     }

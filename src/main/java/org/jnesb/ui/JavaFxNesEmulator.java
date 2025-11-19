@@ -81,6 +81,7 @@ public final class JavaFxNesEmulator extends Application {
     private boolean paused;
     private boolean menuPaused;
     private int menuPauseDepth;
+    private int currentSlot = 1;  // Current save slot (1-9)
 
     public static void launchWith(NesBus bus, Path romPath) throws InterruptedException {
         synchronized (JavaFxNesEmulator.class) {
@@ -712,6 +713,102 @@ public final class JavaFxNesEmulator extends Application {
                 return true;
             }
         }
+
+        // Quick save/load shortcuts
+        if (event.getCode() == KeyCode.F5) {
+            handleQuickSave();
+            return true;
+        }
+        if (event.getCode() == KeyCode.F9) {
+            handleQuickLoad();
+            return true;
+        }
+
+        // Slot selection with Shift+F1-F9
+        if (event.isShiftDown()) {
+            int slot = getSlotFromKeyCode(event.getCode());
+            if (slot > 0) {
+                currentSlot = slot;
+                showSlotNotification("Slot " + currentSlot + " selected");
+                return true;
+            }
+        }
+
         return false;
+    }
+
+    private int getSlotFromKeyCode(KeyCode code) {
+        return switch (code) {
+            case F1 -> 1;
+            case F2 -> 2;
+            case F3 -> 3;
+            case F4 -> 4;
+            case F5 -> 5;
+            case F6 -> 6;
+            case F7 -> 7;
+            case F8 -> 8;
+            case F9 -> 9;
+            default -> 0;
+        };
+    }
+
+    private void handleQuickSave() {
+        if (bus == null || sharedRomPath == null) {
+            return;
+        }
+        try {
+            Path savePath = getQuickSavePath(currentSlot);
+            byte[] data = bus.saveMemoryState();
+            Files.write(savePath, data);
+            showSlotNotification("Saved to slot " + currentSlot);
+        } catch (IOException ex) {
+            showSlotNotification("Save failed: " + ex.getMessage());
+        }
+    }
+
+    private void handleQuickLoad() {
+        if (bus == null || sharedRomPath == null) {
+            return;
+        }
+        try {
+            Path savePath = getQuickSavePath(currentSlot);
+            if (!Files.exists(savePath)) {
+                showSlotNotification("Slot " + currentSlot + " is empty");
+                return;
+            }
+            byte[] data = Files.readAllBytes(savePath);
+            bus.loadMemoryState(data);
+            showSlotNotification("Loaded from slot " + currentSlot);
+        } catch (IOException ex) {
+            showSlotNotification("Load failed: " + ex.getMessage());
+        }
+    }
+
+    private Path getQuickSavePath(int slot) {
+        String romName = sharedRomPath.getFileName().toString();
+        String baseName = romName.contains(".")
+                ? romName.substring(0, romName.lastIndexOf('.'))
+                : romName;
+        String saveFileName = baseName + ".slot" + slot + ".sav";
+        return sharedRomPath.getParent().resolve(saveFileName);
+    }
+
+    private void showSlotNotification(String message) {
+        Platform.runLater(() -> {
+            if (footerLabel != null) {
+                String originalText = buildFooterText();
+                footerLabel.setText(" " + message + " ");
+
+                // Reset after 2 seconds
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(2000);
+                        Platform.runLater(() -> footerLabel.setText(originalText));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).start();
+            }
+        });
     }
 }

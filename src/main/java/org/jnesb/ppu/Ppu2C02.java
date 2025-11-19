@@ -1,16 +1,25 @@
 package org.jnesb.ppu;
 
+import java.nio.ByteBuffer;
+
 import org.jnesb.cartridge.Cartridge;
 import org.jnesb.cartridge.Cartridge.Mirror;
+import org.jnesb.state.Stateful;
 
 /**
  * Java port of the OneLoneCoder olc2C02 PPU background pipeline (Part 4).
  * Implements nametable, palette and background pixel generation logic.
  */
-public final class Ppu2C02 {
+public final class Ppu2C02 implements Stateful {
 
     public static final int SCREEN_WIDTH = 256;
     public static final int SCREEN_HEIGHT = 240;
+
+    // State size calculation:
+    // nameTable: 2*1024 = 2048, paletteTable: 32, oam: 256
+    // registers and internal state: ~100 bytes
+    // sprite arrays: 8*6 = 48
+    private static final int STATE_SIZE = 2048 + 32 + 256 + 200;
 
     private static final int CONTROL_INCREMENT_MODE = 0x04;
     private static final int CONTROL_PATTERN_SPRITE = 0x08;
@@ -533,6 +542,148 @@ public final class Ppu2C02 {
                 nmiRequested = true;
             }
         }
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+
+        // Save nametables (2 * 1024 bytes)
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 1024; j++) {
+                buffer.put((byte) (nameTable[i][j] & 0xFF));
+            }
+        }
+
+        // Save palette table (32 bytes)
+        for (int i = 0; i < 32; i++) {
+            buffer.put((byte) (paletteTable[i] & 0xFF));
+        }
+
+        // Save OAM (256 bytes)
+        for (int i = 0; i < 256; i++) {
+            buffer.put((byte) (oam[i] & 0xFF));
+        }
+
+        // Save registers and internal state
+        buffer.putShort((short) scanline);
+        buffer.putShort((short) cycle);
+        buffer.put((byte) (frameComplete ? 1 : 0));
+        buffer.put((byte) (nmiRequested ? 1 : 0));
+        buffer.put((byte) control);
+        buffer.put((byte) mask);
+        buffer.put((byte) status);
+        buffer.put((byte) oamAddress);
+        buffer.put((byte) addressLatch);
+        buffer.put((byte) ppuDataBuffer);
+        buffer.put((byte) fineX);
+        buffer.putShort((short) vramAddress.get());
+        buffer.putShort((short) tramAddress.get());
+
+        // Background shifters
+        buffer.putShort((short) bgShifterPatternLow);
+        buffer.putShort((short) bgShifterPatternHigh);
+        buffer.putShort((short) bgShifterAttributeLow);
+        buffer.putShort((short) bgShifterAttributeHigh);
+        buffer.put((byte) bgNextTileId);
+        buffer.put((byte) bgNextTileAttribute);
+        buffer.put((byte) bgNextTileLsb);
+        buffer.put((byte) bgNextTileMsb);
+
+        // Sprite state
+        for (int i = 0; i < 8; i++) {
+            buffer.put((byte) spriteShifterPatternLow[i]);
+            buffer.put((byte) spriteShifterPatternHigh[i]);
+            buffer.put((byte) spriteXCounter[i]);
+            buffer.put((byte) spriteAttributes[i]);
+            buffer.put((byte) spriteOamIndex[i]);
+            buffer.put((byte) spriteY[i]);
+            buffer.put((byte) spriteTileId[i]);
+        }
+        buffer.put((byte) spriteCount);
+        buffer.put((byte) (spriteZeroPossible ? 1 : 0));
+        buffer.put((byte) (spriteZeroBeingRendered ? 1 : 0));
+
+        // Mirror mode
+        buffer.put((byte) mirrorMode.ordinal());
+
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+
+        // Load nametables
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 1024; j++) {
+                nameTable[i][j] = buffer.get() & 0xFF;
+            }
+        }
+
+        // Load palette table
+        for (int i = 0; i < 32; i++) {
+            paletteTable[i] = buffer.get() & 0xFF;
+        }
+
+        // Load OAM
+        for (int i = 0; i < 256; i++) {
+            oam[i] = buffer.get() & 0xFF;
+        }
+
+        // Load registers and internal state
+        scanline = buffer.getShort();
+        cycle = buffer.getShort();
+        frameComplete = buffer.get() != 0;
+        nmiRequested = buffer.get() != 0;
+        control = buffer.get() & 0xFF;
+        mask = buffer.get() & 0xFF;
+        status = buffer.get() & 0xFF;
+        oamAddress = buffer.get() & 0xFF;
+        addressLatch = buffer.get() & 0xFF;
+        ppuDataBuffer = buffer.get() & 0xFF;
+        fineX = buffer.get() & 0xFF;
+        vramAddress.set(buffer.getShort() & 0xFFFF);
+        tramAddress.set(buffer.getShort() & 0xFFFF);
+
+        // Background shifters
+        bgShifterPatternLow = buffer.getShort() & 0xFFFF;
+        bgShifterPatternHigh = buffer.getShort() & 0xFFFF;
+        bgShifterAttributeLow = buffer.getShort() & 0xFFFF;
+        bgShifterAttributeHigh = buffer.getShort() & 0xFFFF;
+        bgNextTileId = buffer.get() & 0xFF;
+        bgNextTileAttribute = buffer.get() & 0xFF;
+        bgNextTileLsb = buffer.get() & 0xFF;
+        bgNextTileMsb = buffer.get() & 0xFF;
+
+        // Sprite state
+        for (int i = 0; i < 8; i++) {
+            spriteShifterPatternLow[i] = buffer.get() & 0xFF;
+            spriteShifterPatternHigh[i] = buffer.get() & 0xFF;
+            spriteXCounter[i] = buffer.get() & 0xFF;
+            spriteAttributes[i] = buffer.get() & 0xFF;
+            spriteOamIndex[i] = buffer.get() & 0xFF;
+            spriteY[i] = buffer.get() & 0xFF;
+            spriteTileId[i] = buffer.get() & 0xFF;
+        }
+        spriteCount = buffer.get() & 0xFF;
+        spriteZeroPossible = buffer.get() != 0;
+        spriteZeroBeingRendered = buffer.get() != 0;
+
+        // Mirror mode
+        int mirrorOrdinal = buffer.get() & 0xFF;
+        Mirror[] mirrors = Mirror.values();
+        if (mirrorOrdinal < mirrors.length) {
+            mirrorMode = mirrors[mirrorOrdinal];
+        }
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     private int getVRamIncrement() {

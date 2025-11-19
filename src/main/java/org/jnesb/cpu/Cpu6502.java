@@ -1,14 +1,20 @@
 package org.jnesb.cpu;
 
+import java.nio.ByteBuffer;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+
+import org.jnesb.state.Stateful;
 
 /**
  * Java port of the javidx9 olc6502 CPU implementation.
  * Original source: https://github.com/OneLoneCoder/olcNES (OLC-3 license)
  */
-public class Cpu6502 {
+public class Cpu6502 implements Stateful {
+
+    // State size: 6 registers (1 byte each except PC which is 2) + internal state
+    private static final int STATE_SIZE = 32;
 
     // Status flag bit positions
     private static final int FLAG_C = 1 << 0; // Carry
@@ -146,6 +152,55 @@ public class Cpu6502 {
         if (additionalCycles > 0) {
             cycles += additionalCycles;
         }
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+        // Registers
+        buffer.put((byte) (a & 0xFF));
+        buffer.put((byte) (x & 0xFF));
+        buffer.put((byte) (y & 0xFF));
+        buffer.put((byte) (stkp & 0xFF));
+        buffer.putShort((short) (pc & 0xFFFF));
+        buffer.put((byte) (status & 0xFF));
+        // Internal state
+        buffer.put((byte) (fetched & 0xFF));
+        buffer.putShort((short) (temp & 0xFFFF));
+        buffer.putShort((short) (addrAbs & 0xFFFF));
+        buffer.putShort((short) (addrRel & 0xFFFF));
+        buffer.put((byte) (opcode & 0xFF));
+        buffer.put((byte) (cycles & 0xFF));
+        buffer.putLong(clockCount);
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        // Registers
+        a = buffer.get() & 0xFF;
+        x = buffer.get() & 0xFF;
+        y = buffer.get() & 0xFF;
+        stkp = buffer.get() & 0xFF;
+        pc = buffer.getShort() & 0xFFFF;
+        status = buffer.get() & 0xFF;
+        // Internal state
+        fetched = buffer.get() & 0xFF;
+        temp = buffer.getShort() & 0xFFFF;
+        addrAbs = buffer.getShort() & 0xFFFF;
+        addrRel = buffer.getShort() & 0xFFFF;
+        opcode = buffer.get() & 0xFF;
+        cycles = buffer.get() & 0xFF;
+        clockCount = buffer.getLong();
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     public Map<Integer, String> disassemble(int start, int stop) {
