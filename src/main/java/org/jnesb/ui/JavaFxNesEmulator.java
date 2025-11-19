@@ -309,12 +309,17 @@ public final class JavaFxNesEmulator extends Application {
             return;
         }
         FileChooser chooser = createStateFileChooser(true);
-
+        setMenuPausedTemporarily(true);
+        File target;
         try {
-            File target = chooser.showSaveDialog(primaryStage);
-            if (target == null) {
-                return;
-            }
+            target = chooser.showSaveDialog(primaryStage);
+        } finally {
+            setMenuPausedTemporarily(false);
+        }
+        if (target == null) {
+            return;
+        }
+        try {
             byte[] data = bus.saveMemoryState();
             Files.write(target.toPath(), data);
         } catch (IOException ex) {
@@ -328,11 +333,17 @@ public final class JavaFxNesEmulator extends Application {
             return;
         }
         FileChooser chooser = createStateFileChooser(false);
+        setMenuPausedTemporarily(true);
+        File source;
         try {
-            File source = chooser.showOpenDialog(primaryStage);
-            if (source == null) {
-                return;
-            }
+            source = chooser.showOpenDialog(primaryStage);
+        } finally {
+            setMenuPausedTemporarily(false);
+        }
+        if (source == null) {
+            return;
+        }
+        try {
             byte[] data = Files.readAllBytes(source.toPath());
             // Stop emulation thread to prevent race condition during state load
             boolean wasRunning = running && !paused;
