@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.function.Consumer;
+import java.util.zip.CRC32;
 
 import org.jnesb.state.Stateful;
 
@@ -35,6 +36,7 @@ public final class Cartridge implements Stateful {
     private final Mapper mapper;
     private Mirror mirror;
     private final boolean imageValid;
+    private final int romChecksum;
     private Consumer<Mirror> mirrorConsumer;
 
     private Cartridge(int mapperId,
@@ -45,7 +47,8 @@ public final class Cartridge implements Stateful {
                       byte[] chrMemory,
                       Mapper mapper,
                       Mirror mirror,
-                      boolean imageValid) {
+                      boolean imageValid,
+                      int romChecksum) {
         this.mapperId = mapperId;
         this.prgBanks = prgBanks;
         this.chrBanks = chrBanks;
@@ -55,6 +58,7 @@ public final class Cartridge implements Stateful {
         this.mapper = mapper;
         this.mirror = mirror;
         this.imageValid = imageValid;
+        this.romChecksum = romChecksum;
         if (this.mapper != null) {
             this.mapper.setMirrorListener(this::applyMirror);
             this.mapper.reset();
@@ -71,7 +75,7 @@ public final class Cartridge implements Stateful {
         Header header = Header.read(inputStream);
 
         if (!header.valid) {
-            return new Cartridge(0, 0, 0, new byte[0], new byte[0], new byte[0], null, Mirror.HORIZONTAL, false);
+            return new Cartridge(0, 0, 0, new byte[0], new byte[0], new byte[0], null, Mirror.HORIZONTAL, false, 0);
         }
 
         // Skip trainer if present
@@ -104,7 +108,15 @@ public final class Cartridge implements Stateful {
             default -> throw new IOException("Unsupported mapper: " + mapperId);
         };
 
-        return new Cartridge(mapperId, prgBanks, chrBanks, prgMemory, prgRam, chrMemory, mapper, mirror, true);
+        // Calculate ROM checksum for save state validation
+        CRC32 crc = new CRC32();
+        crc.update(prgMemory);
+        if (chrBanks > 0) {
+            crc.update(chrMemory);
+        }
+        int romChecksum = (int) crc.getValue();
+
+        return new Cartridge(mapperId, prgBanks, chrBanks, prgMemory, prgRam, chrMemory, mapper, mirror, true, romChecksum);
     }
 
     public boolean isImageValid() {
@@ -146,6 +158,10 @@ public final class Cartridge implements Stateful {
 
     public int mapperId() {
         return mapperId;
+    }
+
+    public int romChecksum() {
+        return romChecksum;
     }
 
     public boolean cpuRead(int address, int[] dataOut) {
