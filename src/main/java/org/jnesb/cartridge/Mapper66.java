@@ -1,15 +1,42 @@
 package org.jnesb.cartridge;
 
+import java.nio.ByteBuffer;
+
 /**
  * Mapper 066 (GxROM) implementation with simple PRG/CHR bank selection.
  */
 public final class Mapper66 extends Mapper {
+
+    private static final int STATE_SIZE = 4;
 
     private int chrBankSelect;
     private int prgBankSelect;
 
     public Mapper66(int prgBanks, int chrBanks) {
         super(prgBanks, chrBanks);
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+        buffer.put((byte) chrBankSelect);
+        buffer.put((byte) prgBankSelect);
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        chrBankSelect = buffer.get() & 0xFF;
+        prgBankSelect = buffer.get() & 0xFF;
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     @Override

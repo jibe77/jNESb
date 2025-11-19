@@ -1,5 +1,6 @@
 package org.jnesb.cartridge;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import org.jnesb.cartridge.Cartridge.Mirror;
@@ -8,6 +9,8 @@ import org.jnesb.cartridge.Cartridge.Mirror;
  * Mapper 004 (MMC3) implementation with bank switching and IRQ counter.
  */
 public final class Mapper4 extends Mapper {
+
+    private static final int STATE_SIZE = 64;
 
     private final int[] registers = new int[8];
     private final int[] chrBankOffsets = new int[8];
@@ -24,6 +27,63 @@ public final class Mapper4 extends Mapper {
 
     public Mapper4(int prgBanks, int chrBanks) {
         super(prgBanks, chrBanks);
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+        // Save registers
+        for (int i = 0; i < 8; i++) {
+            buffer.put((byte) registers[i]);
+        }
+        // Save bank offsets
+        for (int i = 0; i < 8; i++) {
+            buffer.putInt(chrBankOffsets[i]);
+        }
+        for (int i = 0; i < 4; i++) {
+            buffer.putInt(prgBankOffsets[i]);
+        }
+        // Save state
+        buffer.put((byte) targetRegister);
+        buffer.put((byte) (prgBankMode ? 1 : 0));
+        buffer.put((byte) (chrInversion ? 1 : 0));
+        buffer.put((byte) (irqActive ? 1 : 0));
+        buffer.put((byte) (irqEnable ? 1 : 0));
+        buffer.put((byte) irqCounter);
+        buffer.put((byte) irqReload);
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        // Load registers
+        for (int i = 0; i < 8; i++) {
+            registers[i] = buffer.get() & 0xFF;
+        }
+        // Load bank offsets
+        for (int i = 0; i < 8; i++) {
+            chrBankOffsets[i] = buffer.getInt();
+        }
+        for (int i = 0; i < 4; i++) {
+            prgBankOffsets[i] = buffer.getInt();
+        }
+        // Load state
+        targetRegister = buffer.get() & 0xFF;
+        prgBankMode = buffer.get() != 0;
+        chrInversion = buffer.get() != 0;
+        irqActive = buffer.get() != 0;
+        irqEnable = buffer.get() != 0;
+        irqCounter = buffer.get() & 0xFF;
+        irqReload = buffer.get() & 0xFF;
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     @Override

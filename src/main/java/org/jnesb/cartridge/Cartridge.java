@@ -2,16 +2,22 @@ package org.jnesb.cartridge;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.function.Consumer;
 
+import org.jnesb.state.Stateful;
+
 /**
  * Java port of the OneLoneCoder olcNES Cartridge abstraction (OLC-3 license).
  * Handles loading iNES images and delegating address translation to a mapper.
  */
-public final class Cartridge {
+public final class Cartridge implements Stateful {
+
+    // Base state size (not including dynamic mapper state)
+    private static final int BASE_STATE_SIZE = 16;
 
     public enum Mirror {
         HORIZONTAL,
@@ -210,6 +216,80 @@ public final class Cartridge {
 
     public int prgRamLength() {
         return prgRam.length;
+    }
+
+    @Override
+    public byte[] saveState() {
+        // Calculate total size
+        byte[] mapperState = mapper != null ? mapper.saveState() : new byte[0];
+        int totalSize = BASE_STATE_SIZE + prgRam.length + chrMemory.length + mapperState.length;
+
+        ByteBuffer buffer = ByteBuffer.allocate(totalSize);
+
+        // Header info
+        buffer.putInt(prgRam.length);
+        buffer.putInt(chrMemory.length);
+        buffer.putInt(mapperState.length);
+        buffer.put((byte) mirror.ordinal());
+
+        // PRG RAM
+        buffer.put(prgRam);
+
+        // CHR Memory (for CHR RAM games)
+        buffer.put(chrMemory);
+
+        // Mapper state
+        buffer.put(mapperState);
+
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < BASE_STATE_SIZE) {
+            return;
+        }
+
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+
+        // Read header
+        int prgRamSize = buffer.getInt();
+        int chrMemSize = buffer.getInt();
+        int mapperStateSize = buffer.getInt();
+        int mirrorOrdinal = buffer.get() & 0xFF;
+
+        // Validate sizes
+        if (prgRamSize != prgRam.length || chrMemSize != chrMemory.length) {
+            return; // Size mismatch, incompatible state
+        }
+
+        // Load PRG RAM
+        buffer.get(prgRam);
+
+        // Load CHR Memory
+        buffer.get(chrMemory);
+
+        // Load mapper state
+        if (mapper != null && mapperStateSize > 0) {
+            byte[] mapperState = new byte[mapperStateSize];
+            buffer.get(mapperState);
+            mapper.loadState(mapperState);
+        }
+
+        // Restore mirror
+        Mirror[] mirrors = Mirror.values();
+        if (mirrorOrdinal < mirrors.length) {
+            mirror = mirrors[mirrorOrdinal];
+            if (mirrorConsumer != null) {
+                mirrorConsumer.accept(mirror);
+            }
+        }
+    }
+
+    @Override
+    public int stateSize() {
+        int mapperSize = mapper != null ? mapper.stateSize() : 0;
+        return BASE_STATE_SIZE + prgRam.length + chrMemory.length + mapperSize;
     }
 
     private void applyMirror(Mirror newMirror) {

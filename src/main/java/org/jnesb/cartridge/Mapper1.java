@@ -1,11 +1,15 @@
 package org.jnesb.cartridge;
 
+import java.nio.ByteBuffer;
+
 import org.jnesb.cartridge.Cartridge.Mirror;
 
 /**
  * Mapper 001 (MMC1) implementation supporting PRG/CHR bank switching.
  */
 public final class Mapper1 extends Mapper {
+
+    private static final int STATE_SIZE = 8;
 
     private int shiftRegister = 0x10;
     private int writeCount = 0;
@@ -17,6 +21,48 @@ public final class Mapper1 extends Mapper {
 
     public Mapper1(int prgBanks, int chrBanks) {
         super(prgBanks, chrBanks);
+    }
+
+    @Override
+    public void reset() {
+        shiftRegister = 0x10;
+        writeCount = 0;
+        control = 0x0C;
+        chrBank0 = 0;
+        chrBank1 = 0;
+        prgBank = 0;
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+        buffer.put((byte) shiftRegister);
+        buffer.put((byte) writeCount);
+        buffer.put((byte) control);
+        buffer.put((byte) chrBank0);
+        buffer.put((byte) chrBank1);
+        buffer.put((byte) prgBank);
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        shiftRegister = buffer.get() & 0xFF;
+        writeCount = buffer.get() & 0xFF;
+        control = buffer.get() & 0xFF;
+        chrBank0 = buffer.get() & 0xFF;
+        chrBank1 = buffer.get() & 0xFF;
+        prgBank = buffer.get() & 0xFF;
+        notifyMirrorChange(decodeMirror(control & 0x03));
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     @Override

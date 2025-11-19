@@ -1,11 +1,17 @@
 package org.jnesb.apu;
 
+import java.nio.ByteBuffer;
 import java.util.function.IntUnaryOperator;
+
+import org.jnesb.state.Stateful;
 
 /**
  * APU amélioré avec timing plus précis et mixage audio correct
  */
-public final class Apu {
+public final class Apu implements Stateful {
+
+    // State size for APU core state
+    private static final int STATE_SIZE = 64;
 
     // Le CPU de la NES tourne à ~1.789773 MHz
     // L'APU génère des échantillons à cette fréquence divisée par 2
@@ -318,6 +324,57 @@ public final class Apu {
 
     public int getCpuCycles() {
         return cpuCycles;
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+
+        // Core APU state
+        buffer.put((byte) (irqInhibit ? 1 : 0));
+        buffer.put((byte) (irqPending ? 1 : 0));
+        buffer.putInt(quarterFrameCount);
+        buffer.putInt(halfFrameCount);
+        buffer.put((byte) statusRegister);
+        buffer.putInt(cpuCycles);
+
+        // Filter state
+        buffer.putDouble(highPassAccumulator);
+        buffer.putDouble(lowPassPrev);
+
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+
+        // Core APU state
+        irqInhibit = buffer.get() != 0;
+        irqPending = buffer.get() != 0;
+        quarterFrameCount = buffer.getInt();
+        halfFrameCount = buffer.getInt();
+        statusRegister = buffer.get() & 0xFF;
+        cpuCycles = buffer.getInt();
+
+        // Filter state
+        highPassAccumulator = buffer.getDouble();
+        lowPassPrev = buffer.getDouble();
+
+        // Re-apply status register to channels
+        pulse1.setEnabled((statusRegister & 0x01) != 0);
+        pulse2.setEnabled((statusRegister & 0x02) != 0);
+        triangle.setEnabled((statusRegister & 0x04) != 0);
+        noise.setEnabled((statusRegister & 0x08) != 0);
+        dmc.setEnabled((statusRegister & 0x10) != 0);
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     private static final class FrameSequencer {

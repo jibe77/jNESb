@@ -1,6 +1,8 @@
 package org.jnesb.bus;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.zip.CRC32;
 
 import org.jnesb.AudioConfig;
 import org.jnesb.apu.Apu;
@@ -16,6 +18,11 @@ import org.jnesb.ppu.Ppu2C02;
  * Responsible for routing CPU/PPU memory access and advancing the system clock.
  */
 public final class NesBus implements CpuBus {
+
+    // Save state format constants
+    private static final byte[] MAGIC = {'j', 'N', 'E', 'S'};
+    private static final short VERSION = 2;
+    private static final int HEADER_SIZE = 4 + 2 + 4; // magic + version + checksum
 
     private static final int AUDIO_BUFFER_CAPACITY = 4096;
 
@@ -65,21 +72,136 @@ public final class NesBus implements CpuBus {
         return controllers[index & 1];
     }
 
+    /**
+     * Saves the complete emulator state to a byte array with structured format.
+     * Format: [MAGIC:4][VERSION:2][CRC32:4][CPU_STATE][PPU_STATE][APU_STATE][CPU_RAM][CARTRIDGE_STATE][SYSTEM_CLOCK:8]
+     */
     public byte[] saveMemoryState() {
+        // Get component states
+        byte[] cpuState = cpu.saveState();
+        byte[] ppuState = ppu.saveState();
+        byte[] apuState = apu.saveState();
+        byte[] cartridgeState = cartridge != null ? cartridge.saveState() : new byte[0];
+
+        // Convert CPU RAM to bytes
         byte[] cpuRamBytes = new byte[cpuRam.length];
         for (int i = 0; i < cpuRam.length; i++) {
             cpuRamBytes[i] = (byte) (cpuRam[i] & 0xFF);
         }
-        byte[] prgRamBytes = cartridge != null ? cartridge.copyPrgRam() : new byte[0];
-        byte[] snapshot = Arrays.copyOf(cpuRamBytes, cpuRamBytes.length + prgRamBytes.length);
-        System.arraycopy(prgRamBytes, 0, snapshot, cpuRamBytes.length, prgRamBytes.length);
-        return snapshot;
+
+        // Calculate total size
+        int payloadSize = 4 + cpuState.length +      // CPU state size + data
+                         4 + ppuState.length +       // PPU state size + data
+                         4 + apuState.length +       // APU state size + data
+                         4 + cpuRamBytes.length +    // CPU RAM size + data
+                         4 + cartridgeState.length + // Cartridge state size + data
+                         8;                          // System clock counter
+
+        int totalSize = HEADER_SIZE + payloadSize;
+        ByteBuffer buffer = ByteBuffer.allocate(totalSize);
+
+        // Write header (checksum placeholder)
+        buffer.put(MAGIC);
+        buffer.putShort(VERSION);
+        int checksumPosition = buffer.position();
+        buffer.putInt(0); // Placeholder for checksum
+
+        // Write payload
+        buffer.putInt(cpuState.length);
+        buffer.put(cpuState);
+
+        buffer.putInt(ppuState.length);
+        buffer.put(ppuState);
+
+        buffer.putInt(apuState.length);
+        buffer.put(apuState);
+
+        buffer.putInt(cpuRamBytes.length);
+        buffer.put(cpuRamBytes);
+
+        buffer.putInt(cartridgeState.length);
+        buffer.put(cartridgeState);
+
+        buffer.putLong(systemClockCounter);
+
+        // Calculate and write checksum
+        byte[] result = buffer.array();
+        CRC32 crc = new CRC32();
+        crc.update(result, HEADER_SIZE, payloadSize);
+        int checksum = (int) crc.getValue();
+        ByteBuffer.wrap(result).position(checksumPosition).putInt(checksum);
+
+        return result;
     }
 
+    /**
+     * Loads the emulator state from a byte array with structured format validation.
+     */
     public void loadMemoryState(byte[] data) {
-        if (data == null) {
+        if (data == null || data.length < HEADER_SIZE) {
             return;
         }
+
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+
+        // Verify magic
+        byte[] magic = new byte[4];
+        buffer.get(magic);
+        if (!Arrays.equals(magic, MAGIC)) {
+            // Try legacy format (old save files)
+            loadLegacyState(data);
+            return;
+        }
+
+        // Read version and checksum
+        short version = buffer.getShort();
+        int storedChecksum = buffer.getInt();
+
+        // Verify checksum
+        CRC32 crc = new CRC32();
+        crc.update(data, HEADER_SIZE, data.length - HEADER_SIZE);
+        int calculatedChecksum = (int) crc.getValue();
+        if (storedChecksum != calculatedChecksum) {
+            return; // Corrupted file
+        }
+
+        // Load component states
+        int cpuStateSize = buffer.getInt();
+        byte[] cpuState = new byte[cpuStateSize];
+        buffer.get(cpuState);
+        cpu.loadState(cpuState);
+
+        int ppuStateSize = buffer.getInt();
+        byte[] ppuState = new byte[ppuStateSize];
+        buffer.get(ppuState);
+        ppu.loadState(ppuState);
+
+        int apuStateSize = buffer.getInt();
+        byte[] apuState = new byte[apuStateSize];
+        buffer.get(apuState);
+        apu.loadState(apuState);
+
+        int cpuRamSize = buffer.getInt();
+        for (int i = 0; i < cpuRamSize && i < cpuRam.length; i++) {
+            cpuRam[i] = buffer.get() & 0xFF;
+        }
+
+        int cartridgeStateSize = buffer.getInt();
+        if (cartridge != null && cartridgeStateSize > 0) {
+            byte[] cartridgeState = new byte[cartridgeStateSize];
+            buffer.get(cartridgeState);
+            cartridge.loadState(cartridgeState);
+        }
+
+        if (buffer.remaining() >= 8) {
+            systemClockCounter = buffer.getLong();
+        }
+    }
+
+    /**
+     * Legacy state loading for backward compatibility with old save files.
+     */
+    private void loadLegacyState(byte[] data) {
         int offset = 0;
         for (int i = 0; i < cpuRam.length && offset < data.length; i++, offset++) {
             cpuRam[i] = data[offset] & 0xFF;

@@ -1,9 +1,13 @@
 package org.jnesb.cartridge;
 
+import java.nio.ByteBuffer;
+
 /**
  * Mapper 002 (UxROM) implementation with 16KB switchable bank.
  */
 public final class Mapper2 extends Mapper {
+
+    private static final int STATE_SIZE = 4;
 
     private int prgBankSelectLo;
     private int prgBankSelectHi;
@@ -11,6 +15,29 @@ public final class Mapper2 extends Mapper {
     public Mapper2(int prgBanks, int chrBanks) {
         super(prgBanks, chrBanks);
         reset();
+    }
+
+    @Override
+    public byte[] saveState() {
+        ByteBuffer buffer = ByteBuffer.allocate(STATE_SIZE);
+        buffer.put((byte) prgBankSelectLo);
+        buffer.put((byte) prgBankSelectHi);
+        return buffer.array();
+    }
+
+    @Override
+    public void loadState(byte[] data) {
+        if (data == null || data.length < STATE_SIZE) {
+            return;
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        prgBankSelectLo = buffer.get() & 0xFF;
+        prgBankSelectHi = buffer.get() & 0xFF;
+    }
+
+    @Override
+    public int stateSize() {
+        return STATE_SIZE;
     }
 
     @Override
