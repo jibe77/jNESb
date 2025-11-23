@@ -379,14 +379,9 @@ public final class Apu implements Stateful {
 
     private static final class FrameSequencer {
 
-        private static final int MAX_FOUR_STEP = 4;
-        private static final int MAX_FIVE_STEP = 5;
-
-        // Timing précis du frame counter en cycles CPU
-        // Mode 4-step: 7457, 14913, 22371, 29829 (29830 avec IRQ)
-        // Mode 5-step: 7457, 14913, 22371, 37281, 37282
-        private static final int[] FOUR_STEP_CYCLES = {7457, 14913, 22371, 29829, 29830};
-        private static final int[] FIVE_STEP_CYCLES = {7457, 14913, 22371, 37281, 37282};
+        // Frame counter timing based on QUARTER_FRAME_PERIOD
+        // Mode 4-step: steps at 1, 2, 3, 4 quarter frames, IRQ at step 4
+        // Mode 5-step: steps at 1, 2, 3, 4, 5 quarter frames, no IRQ
 
         private Mode mode = Mode.FOUR_STEP;
         private int cycleCounter = 0;
@@ -394,53 +389,34 @@ public final class Apu implements Stateful {
 
         FrameEvent tick() {
             cycleCounter++;
-            
-            int[] cycles = mode == Mode.FOUR_STEP ? FOUR_STEP_CYCLES : FIVE_STEP_CYCLES;
-            
-            if (cycleCounter < cycles[stepIndex]) {
+
+            int maxSteps = mode == Mode.FOUR_STEP ? 4 : 5;
+            int targetCycle = QUARTER_FRAME_PERIOD * (stepIndex + 1);
+
+            if (cycleCounter != targetCycle) {
                 return FrameEvent.NONE;
             }
 
-            boolean quarter = false;
+            boolean quarter = true;
             boolean half = false;
             boolean irq = false;
 
-            // Mode 4-step
+            // Mode 4-step: half frame at steps 1 and 3 (0-indexed), IRQ at step 3
             if (mode == Mode.FOUR_STEP) {
-                switch (stepIndex) {
-                    case 0, 1, 2 -> {
-                        quarter = true;
-                        half = (stepIndex == 1);
-                    }
-                    case 3 -> {
-                        quarter = true;
-                        half = true;
-                    }
-                    case 4 -> {
-                        irq = true;
-                        cycleCounter = 0;
-                        stepIndex = 0;
-                        return new FrameEvent(false, false, irq);
-                    }
-                }
+                half = (stepIndex == 1 || stepIndex == 3);
+                irq = (stepIndex == 3);
             }
-            // Mode 5-step
+            // Mode 5-step: half frame at steps 1 and 4 (0-indexed), no IRQ
             else {
-                switch (stepIndex) {
-                    case 0, 2 -> quarter = true;
-                    case 1, 3 -> {
-                        quarter = true;
-                        half = true;
-                    }
-                    case 4 -> {
-                        cycleCounter = 0;
-                        stepIndex = 0;
-                        return FrameEvent.NONE;
-                    }
-                }
+                half = (stepIndex == 1 || stepIndex == 4);
             }
 
             stepIndex++;
+            if (stepIndex >= maxSteps) {
+                cycleCounter = 0;
+                stepIndex = 0;
+            }
+
             return new FrameEvent(quarter, half, irq);
         }
 
