@@ -18,7 +18,7 @@ final class Sprite {
         if (x < 0 || x >= width || y < 0 || y >= height) {
             return;
         }
-        pixels[y * width + x] = (color.r << 16) | (color.g << 8) | color.b;
+        pixels[y * width + x] = (color.r() << 16) | (color.g() << 8) | color.b();
     }
 
     int getPixel(int x, int y) {
